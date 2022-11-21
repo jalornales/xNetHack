@@ -33,7 +33,7 @@ explode(
     int type,     /* same as in zap.c; -(wand typ) for some WAND_CLASS */
     int dam,      /* damage amount */
     char olet,    /* object class or BURNING_OIL or MON_EXPLODE or
-                     TRAPPED_DOOR */
+                     EXPLODING_DOOR */
     int expltype) /* explosion type: controls color of explosion glyphs */
 {
     int i, j, k, damu = dam;
@@ -51,7 +51,7 @@ explode(
     short exploding_wand_typ = 0;
     boolean you_exploding = (olet == MON_EXPLODE && type >= 0);
 
-    if (olet == TRAPPED_DOOR) { /* exploding door */
+    if (olet == EXPLODING_DOOR) { /* exploding door */
         exploding_wand_typ = type;
     }
     if (olet == WAND_CLASS) { /* retributive strike */
@@ -85,6 +85,9 @@ explode(
         default:
             break;
         }
+    } else if (olet == BURNING_OIL) {
+        /* used to provide extra information to zap_over_floor() */
+        exploding_wand_typ = POT_OIL;
     }
     /* muse_unslime: SCR_FIRE */
     if (expltype < 0) {
@@ -185,7 +188,7 @@ explode(
             } else
                 explmask[i][j] = 0;
 
-            if (i + x - 1 == u.ux && j + y - 1 == u.uy) {
+            if (u_at(i + x - 1, j + y - 1)) {
                 switch (adtyp) {
                 case AD_PHYS:
                     explmask[i][j] = 0;
@@ -223,7 +226,7 @@ explode(
             }
             /* can be both you and mtmp if you're swallowed or riding */
             mtmp = m_at(i + x - 1, j + y - 1);
-            if (!mtmp && i + x - 1 == u.ux && j + y - 1 == u.uy)
+            if (!mtmp && u_at(i + x - 1, j + y - 1))
                 mtmp = u.usteed;
             if (mtmp) {
                 if (DEADMONSTER(mtmp))
@@ -334,7 +337,7 @@ explode(
 
                 if (explmask[i][j] == 2)
                     continue;
-                if (i + x - 1 == u.ux && j + y - 1 == u.uy) {
+                if (u_at(i + x - 1, j + y - 1)) {
                     uhurt = (explmask[i][j] == 1) ? 1 : 2;
                     /* If the player is attacking via polyself into something
                      * with an explosion attack, leave them (and their gear)
@@ -355,7 +358,7 @@ explode(
                                           &shopdamage, exploding_wand_typ);
 
                 mtmp = m_at(i + x - 1, j + y - 1);
-                if (!mtmp && i + x - 1 == u.ux && j + y - 1 == u.uy)
+                if (!mtmp && u_at(i + x - 1, j + y - 1))
                     mtmp = u.usteed;
                 if (!mtmp)
                     continue;
@@ -570,7 +573,7 @@ explode(
                     Strcpy(g.killer.name, str);
                 g.killer.format = KILLED_BY_AN;
             } else if ((olet == BURNING_OIL && g.context.mon_moving)
-                       || olet == TRAPPED_DOOR) {
+                       || olet == EXPLODING_DOOR) {
                 g.killer.format = KILLED_BY_AN;
                 Snprintf(g.killer.name, sizeof g.killer.name,
                          "exploding %s",
@@ -758,6 +761,7 @@ scatter(int sx, int sy,  /* location of objects to scatter */
     while (farthest-- > 0) {
         for (stmp = schain; stmp; stmp = stmp->next) {
             if ((stmp->range-- > 0) && (!stmp->stopped)) {
+                g.thrownobj = stmp->obj; /* mainly in case it kills hero */
                 g.bhitpos.x = stmp->ox + stmp->dx;
                 g.bhitpos.y = stmp->oy + stmp->dy;
                 typ = levl[g.bhitpos.x][g.bhitpos.y].typ;
@@ -778,7 +782,7 @@ scatter(int sx, int sy,  /* location of objects to scatter */
                             stmp->stopped = TRUE;
                         }
                     }
-                } else if (g.bhitpos.x == u.ux && g.bhitpos.y == u.uy) {
+                } else if (u_at(g.bhitpos.x, g.bhitpos.y)) {
                     if (scflags & MAY_HITYOU) {
                         int hitvalu, hitu;
 
@@ -806,6 +810,7 @@ scatter(int sx, int sy,  /* location of objects to scatter */
                 stmp->oy = g.bhitpos.y;
                 if (IS_SINK(levl[stmp->ox][stmp->oy].typ))
                     stmp->stopped = TRUE;
+                g.thrownobj = (struct obj *) 0;
             }
         }
     }
@@ -848,9 +853,11 @@ scatter(int sx, int sy,  /* location of objects to scatter */
         newsym(x, y);
     }
     newsym(sx, sy);
-    if (sx == u.ux && sy == u.uy && u.uundetected
-        && hides_under(g.youmonst.data))
+    if (u_at(sx, sy) && u.uundetected && hides_under(g.youmonst.data))
         (void) hideunder(&g.youmonst);
+    if (((mtmp = m_at(sx, sy)) != 0) && mtmp->mtrapped)
+        mtmp->mtrapped = 0;
+    maybe_unhide_at(sx, sy);
     if (lostgoods) /* implies shop_origin and therefore shkp valid */
         credit_report(shkp, 1, FALSE);
     return total;
@@ -975,16 +982,99 @@ mon_explodes(struct monst *mon, struct attack *mattk)
      * eggs have to be done here instead of in the corpse function because
      * otherwise the explosion destroys the egg */
     if (mon->data == &mons[PM_PHOENIX]) {
-        struct obj *obj = mksobj_at(EGG, mon->mx, mon->my, TRUE, FALSE);
+        struct obj *obj = mksobj(EGG, TRUE, FALSE);
         obj->corpsenm = PM_PHOENIX;
         bless(obj);
         obj->quan = 1;
         obj->owt = weight(obj);
         attach_egg_hatch_timeout(obj, 10L);
+        obj_drops_at(obj, mon->mx, mon->my);
     }
 
     /* reset killer */
     g.killer.name[0] = '\0';
+}
+
+/* A monster explodes in a way that doesn't produce a "real" damage-causing
+ * explosion, so it doesn't use explode(), but still affects creatures caught in
+ * it. For things like yellow lights and black lights.
+ * Assumes the caller has already printed "Foo explodes!" or similar; this just
+ * covers the effects.
+ * Supports the player being the one to explode. */
+void
+mon_explodes_nodmg(struct monst *magr, struct attack *mattk)
+{
+    int cx = (magr == &g.youmonst ? u.ux : magr->mx);
+    int cy = (magr == &g.youmonst ? u.uy : magr->my);
+    int x, y;
+    int severity = d((int) mattk->damn, (int) mattk->damd);
+    struct monst *mdef;
+    struct mhitm_data dummy;
+    boolean affects_you = FALSE;
+
+    if (mattk->adtyp != AD_BLND && mattk->adtyp != AD_HALU) {
+        impossible("mon_explodes_nodmg with unimplemented type %d",
+                   mattk->adtyp);
+        return;
+    }
+
+    for (y = cy - 1; y <= cy + 1; y++) {
+        for (x = cx - 1; x <= cx + 1; x++) {
+            if (x == cx && y == cy)
+                continue; /* doesn't affect itself */
+            else if (u_at(x, y)) {
+                affects_you = TRUE;
+                continue; /* handled below */
+            }
+            else if ((mdef = m_at(x, y)) != (struct monst *) 0) {
+                switch(mattk->adtyp) {
+                case AD_BLND:
+                    if (!resists_blnd(mdef)) {
+                        g.vis = cansee(mdef->mx, mdef->my);
+                        mhitm_ad_blnd(magr, mattk, mdef, &dummy);
+                    }
+                    break;
+                case AD_HALU:
+                    if (!resists_light_halu(mdef)) {
+                        g.vis = cansee(mdef->mx, mdef->my);
+                        mhitm_ad_halu(magr, mattk, mdef, &dummy);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    /* affect the player last, so that they can see other monsters getting
+     * affected by it before they go blind or start hallucinating */
+    if (affects_you) {
+        switch(mattk->adtyp) {
+        case AD_BLND:
+            if (!resists_blnd(&g.youmonst)) {
+                /* sometimes you're affected even if it's invisible */
+                if (mon_visible(magr) || (rnd(severity /= 2) > u.ulevel)) {
+                    You("are blinded by a blast of light!");
+                    make_blinded((long) severity, FALSE);
+                    if (!Blind)
+                        Your1(vision_clears);
+                } else if (flags.verbose)
+                    You("get the impression it was not terribly bright.");
+            }
+            break;
+        case AD_HALU:
+            if (!resists_light_halu(&g.youmonst)) {
+                boolean chg;
+                if (!Hallucination)
+                    You("are caught in a blast of kaleidoscopic light!");
+                /* avoid hallucinating the black light as it dies */
+                chg = make_hallucinated(HHallucination + (long) severity,
+                                        FALSE, 0L);
+                You("%s.", chg ? "are freaked out" : "seem unaffected");
+            }
+            break;
+        }
+    }
+    if (magr != &g.youmonst)
+        mondead(magr);
 }
 
 /*explode.c*/

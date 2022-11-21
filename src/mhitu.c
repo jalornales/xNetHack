@@ -359,7 +359,7 @@ wildmiss(struct monst *mtmp, struct attack *mattk)
                 break;
             case 2:
                 pline("%s strikes at %s!", Monst_name,
-                      (levl[mtmp->mux][mtmp->muy].typ == WATER)
+                      is_waterwall(mtmp->mux,mtmp->muy)
                         ? "empty water"
                         : "thin air");
                 break;
@@ -567,7 +567,7 @@ mattacku(register struct monst *mtmp)
      */
     boolean ranged = (distu(mtmp->mx, mtmp->my) > 3),
             range2 = !monnear(mtmp, mtmp->mux, mtmp->muy),
-            foundyou = (mtmp->mux == u.ux && mtmp->muy == u.uy),
+            foundyou = u_at(mtmp->mux, mtmp->muy),
             youseeit = canseemon(mtmp),
             skipnonmagc = FALSE;
 
@@ -1261,7 +1261,7 @@ hitmu(register struct monst *mtmp, register struct attack *mattk)
                 lowerlimit = min((int) g.youmonst.data->mlevel, u.ulevel);
             } else {
                 hpmax_p = &u.uhpmax;
-                lowerlimit = u.ulevel;
+                lowerlimit = minuhpmax(1);
             }
             if (*hpmax_p - mhm.permdmg > lowerlimit)
                 *hpmax_p -= mhm.permdmg;
@@ -1509,14 +1509,28 @@ gulpmu(struct monst *mtmp, struct attack *mattk)
         break;
     case AD_FIRE:
         if (!mtmp->mcan && rn2(2)) {
+            boolean steamy = (mtmp->data == &mons[PM_STEAM_VORTEX]);
             if (Fire_resistance) {
                 shieldeff(u.ux, u.uy);
-                You_feel("mildly hot.");
+                if (steamy) {
+                    if (Hallucination) {
+                        pline("Hmm, nice sauna.");
+                        if (!carrying(TOWEL))
+                            You("wish you had brought a towel.");
+                    }
+                    else {
+                        pline("Superheated vapor swirls around you.");
+                    }
+                }
+                else {
+                    You_feel("mildly hot.");
+                }
                 monstseesu(M_SEEN_FIRE);
                 ugolemeffects(AD_FIRE, tmp);
                 tmp = 0;
             } else
-                You("are burning to a crisp!");
+                You("are %s!", steamy ? "being boiled alive"
+                                      : "burning to a crisp");
             burn_away_slime();
         } else
             tmp = 0;
@@ -1595,7 +1609,6 @@ gulpmu(struct monst *mtmp, struct attack *mattk)
 static int
 explmu(struct monst *mtmp, struct attack *mattk, boolean ufound)
 {
-    boolean kill_agr = TRUE;
     boolean not_affected;
     int tmp;
 
@@ -1608,8 +1621,8 @@ explmu(struct monst *mtmp, struct attack *mattk, boolean ufound)
     if (!ufound) {
         pline("%s explodes at a spot in %s!",
               canseemon(mtmp) ? Monnam(mtmp) : "It",
-              levl[mtmp->mux][mtmp->muy].typ == WATER ? "empty water"
-                                                      : "thin air");
+              is_waterwall(mtmp->mux,mtmp->muy) ? "empty water"
+                                                : "thin air");
     } else {
         hitmsg(mtmp, mattk);
     }
@@ -1619,37 +1632,14 @@ explmu(struct monst *mtmp, struct attack *mattk, boolean ufound)
     case AD_FIRE:
     case AD_ELEC:
         mon_explodes(mtmp, mattk);
-        if (!DEADMONSTER(mtmp))
-            kill_agr = FALSE; /* lifesaving? */
         break;
     case AD_BLND:
         not_affected = resists_blnd(&g.youmonst);
-        if (ufound && !not_affected) {
-            /* sometimes you're affected even if it's invisible */
-            if (mon_visible(mtmp) || (rnd(tmp /= 2) > u.ulevel)) {
-                You("are blinded by a blast of light!");
-                make_blinded((long) tmp, FALSE);
-                if (!Blind)
-                    Your1(vision_clears);
-            } else if (flags.verbose)
-                You("get the impression it was not terribly bright.");
-        }
+        mon_explodes_nodmg(mtmp, mattk);
         break;
     case AD_HALU:
-        not_affected |= Blind || (u.umonnum == PM_BLACK_LIGHT
-                                  || u.umonnum == PM_VIOLET_FUNGUS
-                                  || dmgtype(g.youmonst.data, AD_STUN));
-        if (ufound && !not_affected) {
-            boolean chg;
-            if (!Hallucination)
-                You("are caught in a blast of kaleidoscopic light!");
-            /* avoid hallucinating the black light as it dies */
-            mondead(mtmp);    /* remove it from map now */
-            kill_agr = FALSE; /* already killed (maybe lifesaved) */
-            chg =
-                make_hallucinated(HHallucination + (long) tmp, FALSE, 0L);
-            You("%s.", chg ? "are freaked out" : "seem unaffected");
-        }
+        not_affected = resists_light_halu(&g.youmonst);
+        mon_explodes_nodmg(mtmp, mattk);
         break;
     default:
         impossible("unknown exploder damage type %d", mattk->adtyp);
@@ -1659,7 +1649,7 @@ explmu(struct monst *mtmp, struct attack *mattk, boolean ufound)
         You("seem unaffected by it.");
         ugolemeffects((int) mattk->adtyp, tmp);
     }
-    if (kill_agr && !DEADMONSTER(mtmp))
+    if (!DEADMONSTER(mtmp))
         mondead(mtmp);
     wake_nearto(mtmp->mx, mtmp->my, 7 * 7);
     return (!DEADMONSTER(mtmp)) ? MM_MISS : MM_AGR_DIED;
@@ -2192,6 +2182,7 @@ doseduce(struct monst *mon)
             if (!resists_drli(&g.youmonst) && !item_catches_drain(&g.youmonst)) {
                 You_feel("out of shape.");
                 losexp("overexertion");
+                grow_up(mon, (struct monst *) 0);
             } else {
                 You("have a curious feeling...");
             }

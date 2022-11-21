@@ -196,7 +196,9 @@ mdisplacem(register struct monst *magr, register struct monst *mdef,
     struct permonst *pa, *pd;
     int tx, ty, fx, fy;
 
+#ifdef FUZZER_LOG
     fuzl_p2("mdisplacem", "magr", magr, "mdef", mdef);
+#endif
     /* sanity checks; could matter if we unexpectedly get a long worm */
     if (!magr || !mdef || magr == mdef)
         return MM_MISS;
@@ -315,7 +317,7 @@ mattackm(register struct monst *magr, register struct monst *mdef)
 
     if (!magr || !mdef)
         return MM_MISS; /* mike@genat */
-    if (!magr->mcanmove || magr->msleeping)
+    if (helpless(magr))
         return MM_MISS;
     pa = magr->data;
     pd = mdef->data;
@@ -327,7 +329,7 @@ mattackm(register struct monst *magr, register struct monst *mdef)
 
     /* Calculate the armour class differential. */
     tmp = find_mac(mdef) + magr->m_lev;
-    if (mdef->mconf || !mdef->mcanmove || mdef->msleeping) {
+    if (mdef->mconf || helpless(mdef)) {
         tmp += 4;
         wakeup(mdef, FALSE, TRUE);
     }
@@ -452,7 +454,7 @@ mattackm(register struct monst *magr, register struct monst *mdef)
                             pline("%s divides as %s hits it!", buf,
                                   mon_nam(magr));
                         }
-                        (void) mintrap(mclone);
+                        (void) mintrap(mclone, NO_TRAP_FLAGS);
                     }
                 }
             } else
@@ -554,7 +556,7 @@ mattackm(register struct monst *magr, register struct monst *mdef)
         if (res[i] & MM_AGR_DIED)
             return res[i];
         /* return if aggressor can no longer attack */
-        if (!magr->mcanmove || magr->msleeping)
+        if (helpless(magr))
             return res[i];
         if (res[i] & MM_HIT)
             struck = 1; /* at least one hit */
@@ -735,6 +737,10 @@ engulf_target(struct monst *magr, struct monst *mdef)
     if (mdef->data->msize >= MZ_HUGE)
         return FALSE;
 
+    /* can't swallow trapped monsters. TODO: could do some? */
+    if (mdef->mtrapped)
+        return FALSE;
+
     /* (hypothetical) engulfers who can pass through walls aren't
      limited by rock|trees|bars */
     if ((magr == &g.youmonst) ? Passes_walls : passes_walls(magr->data))
@@ -828,7 +834,9 @@ gulpmm(register struct monst *magr, register struct monst *mdef,
         place_monster(magr, dx, dy);
         newsym(dx, dy);
         /* aggressor moves to <dx,dy> and might encounter trouble there */
-        if (minliquid(magr) || (t_at(dx, dy) && mintrap(magr) == Trap_Killed_Mon))
+        if (minliquid(magr)
+            || (t_at(dx, dy)
+                && mintrap(magr, NO_TRAP_FLAGS) == Trap_Killed_Mon))
             status |= MM_AGR_DIED;
     } else if (status & MM_AGR_DIED) { /* aggressor died */
         place_monster(mdef, dx, dy);
@@ -851,6 +859,8 @@ static int
 explmm(struct monst *magr, struct monst *mdef, struct attack *mattk)
 {
     int result;
+    /* it's not currently possible to leash any exploding monsters... */
+    boolean was_leashed = (magr->mleashed != 0);
 
     if (magr->mcan)
         return MM_MISS;
@@ -864,26 +874,21 @@ explmm(struct monst *magr, struct monst *mdef, struct attack *mattk)
     if (mattk->adtyp == AD_FIRE || mattk->adtyp == AD_COLD
         || mattk->adtyp == AD_ELEC) {
         mon_explodes(magr, mattk);
-        /* unconditionally set AGR_DIED here; lifesaving is accounted below */
-        result = MM_AGR_DIED | (DEADMONSTER(mdef) ? MM_DEF_DIED : 0);
     } else {
-        result = mdamagem(magr, mdef, mattk, (struct obj *) 0, 0);
+        mon_explodes_nodmg(magr, mattk);
     }
+    /* unconditionally set AGR_DIED here; lifesaving is accounted below */
+    result = MM_AGR_DIED | (DEADMONSTER(mdef) ? MM_DEF_DIED : 0);
 
-    /* Kill off aggressor if it didn't die. */
-    if (!(result & MM_AGR_DIED)) {
-        boolean was_leashed = (magr->mleashed != 0);
+    /* it's also not currently possible for any exploding monsters to wear life
+     * saving... */
+    if (!DEADMONSTER(magr))
+        return result; /* life saved */
 
-        mondead(magr);
-        if (!DEADMONSTER(magr))
-            return result; /* life saved */
-        result |= MM_AGR_DIED;
-
-        /* mondead() -> m_detach() -> m_unleash() always suppresses
-           the m_unleash() slack message, so deliver it here instead */
-        if (was_leashed)
-            Your("leash falls slack.");
-    }
+    /* mondead() -> m_detach() -> m_unleash() always suppresses
+       the m_unleash() slack message, so deliver it here instead */
+    if (was_leashed)
+        Your("leash falls slack.");
     if (magr->mtame) /* give this one even if it was visible */
         You(brief_feeling, "melancholy");
 
@@ -1114,7 +1119,7 @@ sleep_monst(struct monst *mon, int amt, int how)
 void
 slept_monst(struct monst *mon)
 {
-    if ((mon->msleeping || !mon->mcanmove) && mon == u.ustuck
+    if (helpless(mon) && mon == u.ustuck
         && !sticks(g.youmonst.data) && !u.uswallow) {
         pline("%s grip relaxes.", s_suffix(Monnam(mon)));
         unstuck(mon);

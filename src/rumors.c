@@ -418,7 +418,7 @@ get_rnd_line(
     unsigned padlength) /* expected line length; 0 if no expectations */
 {
     char *newl, xbuf[BUFSZ];
-    long filechunksize, chunkoffset;
+    long filechunksize, chunkoffset = 0L;
     int trylimit;
 
     *buf = '\0';
@@ -452,7 +452,11 @@ get_rnd_line(
      * them to normal length.  That yields even selection distribution.
      */
     for (trylimit = 10; trylimit > 0; --trylimit) {
-        chunkoffset = (long) (*rng)((int) filechunksize);
+        if (rng) {
+            chunkoffset = (long) (*rng)((int) filechunksize);
+        }
+        debugpline4("seeking to %ld (+%ld) in range %ld/%ld",
+                    startpos + chunkoffset, chunkoffset, startpos, endpos);
         (void) dlb_fseek(fh, startpos + chunkoffset, SEEK_SET);
         (void) dlb_fgets(buf, bufsiz, fh);
         /* if padlength is 0, accept any position; when non-zero,
@@ -468,6 +472,11 @@ get_rnd_line(
         /* assume failure is due to end-of-file; go back to start */
         (void) dlb_fseek(fh, startpos, SEEK_SET);
         (void) dlb_fgets(buf, bufsiz, fh);
+        /* get the line _after_ the startpos if we might be trying to read
+           from the middle of a line, where xcrypt won't work. */
+        if (startpos > padlength) {
+            (void) dlb_fgets(buf, bufsiz, fh);
+        }
     }
     if ((newl = index(buf, '\n')) != 0)
         *newl = '\0';
@@ -816,10 +825,11 @@ CapitalMon(
         /*
          * Unlike name_to_mon(), we don't need to find the longest match
          * or return the gender or a pointer to trailing stuff.  We do
-         * check full words though: "Foo" matches "Foo" and "Foo bar" but
-         * not "Foobar".  We use case-sensitive matching here.
+         * check full words though: "Foo" matches "Foo" and "Foo bar" and
+         * "Foo's bar" but not "Foobar".  We use case-sensitive matching.
          */
-        if (!strncmp(nam, word, nln) && (!word[nln] || word[nln] == ' '))
+        if (!strncmp(nam, word, nln)
+            && (!word[nln] || word[nln] == ' ' || word[nln] == '\''))
             return TRUE; /* 'word' is a capitalized monster name */
     }
     return FALSE;

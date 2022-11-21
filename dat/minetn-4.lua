@@ -1,10 +1,12 @@
--- NetHack 3.7	mines.des	$NHDT-Date: 1548631704 2019/01/27 23:28:24 $  $NHDT-Branch: NetHack-3.6.2-beta01 $:$NHDT-Revision: 1.30 $
+-- NetHack mines minetn-4.lua	$NHDT-Date: 1652196031 2022/05/10 15:20:31 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.2 $
 --	Copyright (c) 1989-95 by Jean-Christophe Collet
 --	Copyright (c) 1991-95 by M. Stephenson
 -- NetHack may be freely redistributed.  See license for details.
 --
 -- Minetown variant 4 by Kelly Bailey
 -- "College Town"
+
+local toolshopchance = percent(30)
 
 des.room({ type = "ordinary", lit=1, x=25,y=3,
            xalign="left", yalign="top", w=30, h=15,
@@ -53,13 +55,13 @@ des.room({ type = "ordinary", lit=1, x=25,y=3,
                          end
               })
 
-              des.room({ type = "tool shop", chance=90, lit=1, x=4,y=10, w=3,h=3,
-                         contents = function()
+              des.room({ type = toolshopchance and "tool shop" or "ordinary",
+                         lit=1, x=3,y=10, w=3,h=3, contents = function()
                             des.door({ state = "closed", wall="north" })
                          end
               })
 
-              des.room({ type = "ordinary", x=8, y=11, w=2, h=2,
+              des.room({ type = "ordinary", x=7, y=11, w=2, h=2,
                          contents = function()
                             des.door({ state = "locked", wall="south" })
                             des.monster("kobold shaman")
@@ -69,26 +71,30 @@ des.room({ type = "ordinary", lit=1, x=25,y=3,
                          end
               })
 
-              des.room({ type = monkfoodshop(), chance=90, lit=1, x=11, y=11, w=3, h=2,
+              des.room({ type = monkfoodshop(), chance=90, lit=1, x=10, y=11, w=3, h=2,
                          contents = function()
                             des.door({ state = "closed", wall="east" })
                          end
               })
 
-              des.room({ type = "ordinary", x=17, y=11, w=2, h=2,
+              local rtype = "ordinary"
+              if (not toolshopchance) or percent(10) then
+                 rtype = "scroll shop"
+              end
+              des.room({ type = rtype, x=17, y=11, w=3, h=2,
                          contents = function()
                             des.door({ state = "closed", wall="west" })
                          end
               })
 
-              des.room({ type = "ordinary", x=20, y=10, w=2, h=2,
+              des.room({ type = "ordinary", x=21, y=10, w=2, h=2,
                          contents = function()
                             des.door({ state = "locked", wall="north" })
                             des.monster("G")
                          end
               })
 
-              des.room({ type = "shop", chance=90, lit=1, x=23, y=10, w=3, h=3,
+              des.room({ type = "shop", chance=80, lit=1, x=24, y=10, w=3, h=3,
                          contents = function()
                             des.door({ state = "closed", wall="north" })
                          end

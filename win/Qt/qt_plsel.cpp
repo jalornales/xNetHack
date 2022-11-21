@@ -74,8 +74,7 @@ void centerOnMain( QWidget* w );
 
 // hack: padded with blank lines by inserting breaks above and below in
 // order to force window to be tall enough to show all the roles at once
-static const char nh_attribution[] = "<br><center><big>NetHack %1</big>"
-        "<br><small>by the NetHack DevTeam</small></center><br>";
+static const char nh_attribution[] = "<br><center><big>xNetHack %1</big>";
 
 //
 // None of these extra classes seem to be used except for NhPSListView. [pr]
@@ -280,7 +279,7 @@ NetHackQtPlayerSelector::NetHackQtPlayerSelector(
     QVBoxLayout* vbab UNUSED = new QVBoxLayout(alignbox);
     char versionbuf[QBUFSZ];
     QLabel *logo = new QLabel(QString(nh_attribution).arg(
-                                           version_string(versionbuf)), this);
+                        version_string(versionbuf, sizeof versionbuf)), this);
 
     l->addWidget( namebox, 0,0,1,3 );
     role = new NhPSListView(this);

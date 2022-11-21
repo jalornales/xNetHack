@@ -763,8 +763,11 @@ void NetHackQtMenuWindow::All()
     if (counting)
         ClearCount(); // discard any pending count
     for (int row = 0; row < itemcount; ++row) {
-        itemlist[row].selected = itemlist[row].preselected = false;
-        if (!itemlist[row].Selectable())
+        itemlist[row].preselected = false; // stale for all rows
+        // skip if not selectable or already selected or fails invert_test()
+        if (!itemlist[row].Selectable()
+            || itemlist[row].selected
+            || !menuitem_invert_test(1, itemlist[row].itemflags, FALSE))
             continue;
         itemlist[row].selected = true;
 
@@ -792,9 +795,13 @@ void NetHackQtMenuWindow::ChooseNone()
     if (counting)
         ClearCount(); // discard any pending count
     for (int row = 0; row < itemcount; ++row) {
-        itemlist[row].selected = itemlist[row].preselected = false;
-        if (!itemlist[row].Selectable())
+        itemlist[row].preselected = false; // stale for all rows
+        // skip if not selectable or already unselected or fails invert_test()
+        if (!itemlist[row].Selectable()
+            || !itemlist[row].selected
+            || !menuitem_invert_test(2, itemlist[row].itemflags, TRUE))
             continue;
+        itemlist[row].selected = false;
 
         QTableWidgetItem *count = table->item(row, 0);
         if (count != NULL) {
@@ -820,8 +827,10 @@ void NetHackQtMenuWindow::Invert()
     if (counting)
         ClearCount(); // discard any pending count
     for (int row = 0; row < itemcount; ++row) {
-        if (!menuitem_invert_test(0, itemlist[row].itemflags,
-                                  itemlist[row].preselected))
+        itemlist[row].preselected = false; // stale for all rows
+        if (!itemlist[row].Selectable()
+            || !menuitem_invert_test(0, itemlist[row].itemflags,
+                                     itemlist[row].selected))
             continue;
         ToggleSelect(row, false);
     }
@@ -1049,7 +1058,7 @@ void NetHackQtTextWindow::UseRIP(int how, time_t when)
 
     char buf[BUFSZ];
     char *dpx;
-    int line;
+    int line, snpres;
 
     /* Put name on stone */
     (void) snprintf(rip_line[NAME_LINE], STONE_LINE_LEN + 1,
@@ -1070,8 +1079,8 @@ void NetHackQtTextWindow::UseRIP(int how, time_t when)
        it's arbitrary but still way, way more than could ever be needed */
     if (cash > 999999999L)
         cash = 999999999L;
-    (void) snprintf(rip_line[GOLD_LINE], STONE_LINE_LEN + 1, "%ld Au", cash);
-
+    snpres = snprintf(rip_line[GOLD_LINE], STONE_LINE_LEN + 1, "%ld Au", cash);
+    nhUse(snpres);
     /* Put together death description */
     formatkiller(buf, sizeof buf, how, FALSE);
     //str_copy(buf, killer, SIZE(buf));
