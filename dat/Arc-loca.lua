@@ -39,7 +39,7 @@ des.non_diggable(nondig)
 
 -- Jungle filler on the left side
 local forest_max_x = 40
-local trees = selection.gradient({ type="square", x=forest_max_x, y=00, x2=forest_max_x, y2=19, maxdist=60, limited=false })
+local trees = selection.gradient({ type="square", x=forest_max_x, y=00, x2=forest_max_x, y2=19, maxdist=60, limited=false }):negate()
 trees = trees & selection.area(00,00,forest_max_x,19)
 des.terrain({ selection=trees, typ='T' })
 
@@ -56,7 +56,7 @@ des.replace_terrain({ selection=path, fromterrain='T', toterrain='.' })
 -- Also clear off trees and force levelporting to land by the stairs
 local stairbox = selection.area(00, ustairy-1, 01, ustairy+1)
 des.replace_terrain({ selection=stairbox, fromterrain='T', toterrain='.' })
-des.teleport_region({ region={00,ustairy-1, 01, ustairy+1}, exclude_islev=1, dir="down" })
+des.teleport_region({ region={00,ustairy-1, 01, ustairy+1}, dir="down" })
 
 -- Fill in inaccessible pockets in forest
 local nostairaccess = selection.floodfill(01, ustairy, true):negate() & selection.area(00,00,31,19)
@@ -91,7 +91,12 @@ end
 -- Rolling boulder trap room
 -- Original design of this level called for six traps, one on each of the 6
 -- spaces with height 5 in this room, with a vertically rolling boulder.
--- However, we can't specify their launch coordinates from here.
+-- We can now specify launch coordinates on rolling boulder traps, but the
+-- problem with this is that rolling boulder traps get created with their
+-- secondary launch2 point equidistant on the opposite side of the trap as
+-- launch1. This would mean in order for this room to behave as desired (and not
+-- segfault when a boulder tries to roll off the map), the traps would be in a
+-- predictable line down the middle, which isn't interesting.
 -- Instead, just put a bunch of traps in the center of the room and hope that
 -- most of them will generate appropriate coordinates and a boulder.
 local bouldertraps = selection.area(60,16,65,18)
@@ -234,4 +239,4 @@ for i=1,#statue_coords do
 end
 
 -- Treasure?
-des.engraving({ type="engrave", coord=outside:rndcoord(), text="X marks the spot." })
+des.engraving({ type="engrave", coord=outside:filter_mapchar('.'):rndcoord(), text="X marks the spot." })

@@ -5,7 +5,7 @@
 --
 des.level_init({ style = "solidfill", fg = " " });
 
-des.level_flags("mazelevel", "hardfloor", "outdoors", "noteleport")
+des.level_flags("mazelevel", "hardfloor", "outdoors", "noteleport", "nommap-boss")
 --         1         2         3         4         5         6         7 
 --123456789012345678901234567890123456789012345678901234567890123456789012345
 des.map([[
@@ -36,8 +36,8 @@ des.region(selection.area(00,00,75,18), "lit")
 des.region(selection.area(62,03,72,11), "unlit")
 
 -- Constrain arrival location by levelport
-des.teleport_region({ region={00,00,06,04}, exclude_islev=1, dir="down" })
-des.teleport_region({ region={62,03,72,11}, exclude_islev=1, dir="up" })
+des.teleport_region({ region={00,00,06,04}, dir="down" })
+des.teleport_region({ region={62,03,72,11}, dir="up" })
 
 -- Stairs
 des.stair("up", 00,00)
@@ -66,6 +66,14 @@ des.object()
 for i=1,5 do
   des.object("boulder")
 end
+-- since vegetarian monks shouldn't eat giant corpses, give a chance for
+-- Str boost that isn't throttled by exercise restrictions;
+-- in vanilla there is an Elbereth that attempts to partially prevent xorns from
+-- eating the tins, but this isn't actually functional, so ignore it
+local tinplace = selection.negate():filter_mapchar('.')
+local tinloc = tinplace:rndcoord(0)
+des.object({ id="tin", coord=tinloc, quantity=2, buc="blessed",
+             montype="spinach" })
 
 -- Traps
 forest = selection.floodfill(01, 01)

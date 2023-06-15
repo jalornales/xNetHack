@@ -11,6 +11,15 @@
 
 #define CONTEXTVERBSZ 30
 
+enum nh_tips {
+    TIP_ENHANCE = 0, /* #enhance */
+    TIP_SWIM,        /* walking into water */
+    TIP_UNTRAP_MON,  /* walking into trapped peaceful */
+    TIP_GETPOS,      /* getpos/farlook */
+
+    NUM_TIPS
+};
+
 /*
  * The context structure houses things that the game tracks
  * or adjusts during the game, to preserve game state or context.
@@ -42,7 +51,7 @@ struct book_info {
 struct crystalball_info {
     struct obj* ball;
     unsigned o_id;
-    xchar looktime;
+    uchar looktime;
 };
 
 struct takeoff_info {
@@ -76,7 +85,7 @@ struct engrave_info {
                            the possible mutations of this */
     char *nextc;        /* next character(s) in text[] to engrave */
     struct obj *stylus; /* object doing the writing */
-    xchar type;         /* type of engraving (DUST, MARK, etc) */
+    xint8 type;         /* type of engraving (DUST, MARK, etc) */
     coord pos;          /* location the engraving is being placed on */
     int actionct;       /* nth turn spent engraving */
 };
@@ -111,7 +120,7 @@ struct tribute_info {
 struct novel_tracking { /* for choosing random passage when reading novel */
     unsigned id;        /* novel oid from previous passage selection */
     int count;          /* number of passage indices available in pasg[] */
-    xchar pasg[30];     /* pasg[0..count-1] are passage indices */
+    xint8 pasg[30];     /* pasg[0..count-1] are passage indices */
     /* tribute file is allowed to have more than 30 passages for a novel;
        if it does, reading will first choose a random subset of 30 of them;
        reading all 30 or switching to a different novel and then back again
@@ -133,14 +142,33 @@ struct achievement_tracking {
     boolean minetn_reached;     /* avoid redundant checking for town entry */
 };
 
+struct fiend_info {
+    int mndx;            /* PM_* index of this fiend */
+    /* has_wish is unused yet - needs to be migrated from wish_dlords */
+    boolean has_wish;    /* is guarding a wand of wishing this game */
+    unsigned num_in_dgn; /* how many of it exist in the dungeon (usually 0 or 1,
+                            but could be more for Juiblex; since he can be split
+                            indefinitely and copies can go to different levels,
+                            we need a way to check if all the copies of him are
+                            dead or not) */
+    boolean escaped;     /* if they escaped the dungeon (not bribing) */
+    /* there are a few possible extensions, like saving the monster struct or
+     * location so we can do things with them when they're off-level */
+};
+/* it isn't great to have to define this here instead of defining
+ * FIRST_ARCHFIEND and LAST_ARCHFIEND, but we can't use subtraction to define an
+ * array size anyway; if adding any more demon lords or princes, adjust this
+ * number */
+#define NUM_ARCHFIENDS 8
+
 struct context_info {
     unsigned ident;         /* social security number for each monster */
     unsigned no_of_wizards; /* 0, 1 or 2 (wizard and his shadow) */
-    unsigned run;           /* 0: h (etc), 1: H (etc), 2: fh (etc) */
-                            /* 3: FH, 4: ff+, 5: ff-, 6: FF+, 7: FF- */
-                            /* 8: travel */
+    unsigned run;           /* 0: h (etc), 1: H (etc), 2: fh (etc),
+                             * 3: FH, 4: ff+, 5: ff-, 6: FF+, 7: FF-,
+                             * 8: travel */
     unsigned startingpet_mid; /* monster id number for initial pet */
-    int current_fruit;      /* fruit->fid corresponding to g.pl_fruit[] */
+    int current_fruit;      /* fruit->fid corresponding to gp.pl_fruit[] */
     int mysteryforce;       /* adjusts how often "mysterious force" kicks in */
     int rndencode;          /* randomized escape sequence introducer */
     int warnlevel;          /* threshold (digit) to warn about unseen mons */
@@ -160,8 +188,7 @@ struct context_info {
     boolean botl;        /* partially redo status line */
     boolean botlx;       /* print an entirely new bottom line */
     boolean door_opened; /* set to true if door was opened during test_move */
-    boolean enhance_tip; /* player is informed about #enhance */
-    boolean swim_tip;    /* player was informed about walking into water */
+    boolean tips[NUM_TIPS];
     struct dig_info digging;
     struct victual_info victual;
     struct engrave_info engraving;
@@ -175,6 +202,8 @@ struct context_info {
     struct tribute_info tribute;
     struct novel_tracking novel;
     struct achievement_tracking achieveo;
+    char jingle[5 + 1];
+    struct fiend_info archfiends[NUM_ARCHFIENDS];
 };
 
 #endif /* CONTEXT_H */

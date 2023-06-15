@@ -9,6 +9,13 @@
 #include "wintty.h"
 #include "tcap.h"
 
+#ifdef VMSVSI
+#include <lib$routines.h>
+#include <smg$routines.h>
+#include <starlet.h>
+#include <elfdef.h>
+#endif
+
 #include <descrip.h>
 #include <iodef.h>
 #ifndef __GNUC__
@@ -32,11 +39,16 @@
 #include <errno.h>
 #include <signal.h>
 
+
+#ifndef VMSVSI
 unsigned long lib$disable_ctrl(), lib$enable_ctrl();
 unsigned long sys$assign(), sys$dassgn(), sys$qiow();
+#endif
 #ifndef USE_QIO_INPUT
+#ifndef VMSVSI
 unsigned long smg$create_virtual_keyboard(), smg$delete_virtual_keyboard(),
     smg$read_keystroke(), smg$cancel_input();
+#endif
 #else
 static short parse_function_key(int);
 #endif
@@ -146,7 +158,7 @@ vms_getchar(void)
     static volatile int recurse = 0; /* SMG is not AST re-entrant! */
 #endif
 
-    if (g.program_state.done_hup) {
+    if (gp.program_state.done_hup) {
         /* hangup has occurred; do not attempt to get further user input */
         return ESC;
     }
@@ -171,16 +183,16 @@ vms_getchar(void)
         } else if (kb_buf == ESC || kb_buf == CSI || kb_buf == SS3) {
             switch (parse_function_key((int) kb_buf)) {
             case SMG$K_TRM_UP:
-                key = g.Cmd.move_N;
+                key = gc.Cmd.dirchars[2];
                 break;
             case SMG$K_TRM_DOWN:
-                key = g.Cmd.move_S;
+                key = gc.Cmd.dirchars[6];
                 break;
             case SMG$K_TRM_LEFT:
-                key = g.Cmd.move_W;
+                key = gc.Cmd.dirchars[0];
                 break;
             case SMG$K_TRM_RIGHT:
-                key = g.Cmd.move_E;
+                key = gc.Cmd.dirchars[4];
                 break;
             default:
                 key = ESC;
@@ -201,16 +213,16 @@ vms_getchar(void)
         smg$read_keystroke(&kb, &key);
         switch (key) {
         case SMG$K_TRM_UP:
-            key = g.Cmd.move_N;
+            key = gc.Cmd.move_N;
             break;
         case SMG$K_TRM_DOWN:
-            key = g.Cmd.move_S;
+            key = gc.Cmd.move_S;
             break;
         case SMG$K_TRM_LEFT:
-            key = g.Cmd.move_W;
+            key = gc.Cmd.move_W;
             break;
         case SMG$K_TRM_RIGHT:
-            key = g.Cmd.move_E;
+            key = gc.Cmd.move_E;
             break;
         case '\r':
             key = '\n';
@@ -521,9 +533,11 @@ introff(void)
 
 #ifdef TIMED_DELAY
 
+#ifndef VMSVSI
 extern unsigned long lib$emul(const long *, const long *, const long *,
                               long *);
 extern unsigned long sys$schdwk(), sys$hiber();
+#endif
 
 #define VMS_UNITS_PER_SECOND 10000000L /* hundreds of nanoseconds, 1e-7 */
 /* constant for conversion from milliseconds to VMS delta time (negative) */
@@ -563,7 +577,21 @@ VA_DECL(const char *, s)
     VA_END();
 #ifndef SAVE_ON_FATAL_ERROR
     /* prevent vmsmain's exit handler byebye() from calling hangup() */
-    sethanguphandler((void (*)(int) )) SIG_DFL;
+/*    sethanguphandler((void (*)(int) )) SIG_DFL; */
+    sethanguphandler((SIG_RET_TYPE) SIG_DFL);
 #endif
     exit(EXIT_FAILURE);
 }
+#ifdef ENHANCED_SYMBOLS
+/*
+ * set in tty_start_screen() and allows
+ * OS-specific changes that may be
+ * required for support of utf8.
+ * Currently a placeholder for VMS.
+ */
+void
+tty_utf8graphics_fixup(void)
+{
+}
+#endif  /* ENHANCED_SYMBOLS */
+

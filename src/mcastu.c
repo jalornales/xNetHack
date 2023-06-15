@@ -18,7 +18,13 @@ enum mcast_mage_spells {
     MGC_AGGRAVATION,
     MGC_SUMMON_MONS,
     MGC_CLONE_WIZ,
-    MGC_DEATH_TOUCH
+    MGC_DEATH_TOUCH,
+    MGC_ENTOMB,
+    MGC_TPORT_AWAY,
+    MGC_DARK_SPEECH,
+    MGC_SHEER_COLD, /* Asmodeus - emulates an AT_MAGC AD_COLD attack */
+    MGC_BLIGHT,
+    MGC_DISENCHANT
 };
 
 /* monster cleric spells */
@@ -41,9 +47,12 @@ static int choose_clerical_spell(int);
 static int m_cure_self(struct monst *, int);
 static void cast_wizard_spell(struct monst *, int, int);
 static void cast_cleric_spell(struct monst *, int, int);
+static boolean has_special_spell_list(struct permonst *);
+static int choose_special_spell(struct monst *);
 static boolean is_undirected_spell(unsigned int, int);
-static boolean
-spell_would_be_useless(struct monst *, unsigned int, int);
+static boolean spell_would_be_useless(struct monst *, unsigned int, int);
+static boolean is_entombed(coordxy, coordxy);
+static void sheer_cold(int *dmg);
 
 /* feedback when frustrated monster couldn't cast a spell */
 static void
@@ -56,7 +65,7 @@ cursetxt(struct monst *mtmp, boolean undirected)
             point_msg = "all around, then curses";
         else if ((Invis && !perceives(mtmp->data)
                   && (mtmp->mux != u.ux || mtmp->muy != u.uy))
-                 || is_obj_mappear(&g.youmonst, STRANGE_OBJECT)
+                 || is_obj_mappear(&gy.youmonst, STRANGE_OBJECT)
                  || u.uundetected)
             point_msg = "and curses in your general direction";
         else if (Displaced && (mtmp->mux != u.ux || mtmp->muy != u.uy))
@@ -65,13 +74,13 @@ cursetxt(struct monst *mtmp, boolean undirected)
             point_msg = "at you, then curses";
 
         pline("%s points %s.", Monnam(mtmp), point_msg);
-    } else if ((!(g.moves % 4) || !rn2(4))) {
+    } else if ((!(gm.moves % 4) || !rn2(4))) {
         if (!Deaf)
             Norep("You hear a mumbled curse.");   /* Deaf-aware */
     }
 }
 
-/* convert a level based random selection into a specific mage spell;
+/* convert a level-based random selection into a specific mage spell;
    inappropriate choices will be screened out by spell_would_be_useless() */
 static int
 choose_magic_spell(int spellval)
@@ -125,7 +134,7 @@ choose_magic_spell(int spellval)
     }
 }
 
-/* convert a level based random selection into a specific cleric spell */
+/* convert a level-based random selection into a specific cleric spell */
 static int
 choose_clerical_spell(int spellnum)
 {
@@ -168,15 +177,106 @@ choose_clerical_spell(int spellnum)
     }
 }
 
+/* does mdat, a spellcaster, use a special spell list and avoid the normal mage
+ * spell / cleric spell dichotomy?
+ * Note that because of the logic in castmu() calling either cast_wizard_spell
+ * or cast_cleric_spell based on the adtyp, it's not currently possible to
+ * construct a custom spell with spells mismatching the adtyp (if one were to
+ * try, the spells from the type not matching the adtyp would be treated as
+ * those matching the adtyp - a mage-spell caster attempting to cast
+ * CLC_OPEN_WOUNDS would instead cast MGC_PSI_BOLT, etc.) Refactoring would be
+ * needed to make this work.
+ */
+static boolean
+has_special_spell_list(struct permonst *mdat)
+{
+    /* Add more monsters to this list as needed. */
+    switch (monsndx(mdat)) {
+    case PM_DISPATER:
+    case PM_ASMODEUS:
+    case PM_DEMOGORGON:
+    case PM_ORCUS:
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* mdat is a spellcaster with a special spell list; return a spell from its list
+ */
+static int
+choose_special_spell(struct monst *mtmp)
+{
+    if (mtmp->data == &mons[PM_DISPATER]) {
+        /* Dispater is defense-oriented and doesn't really cast direct attack
+         * spells. Instead he tries to keep away from you and prevent you from
+         * getting to him. */
+        if (mtmp->mhp * 8 < mtmp->mhpmax || monnear(mtmp, mtmp->mux, mtmp->muy))
+            return MGC_TPORT_AWAY;
+
+        static const int dispater_list[] = {
+            MGC_CURE_SELF, MGC_AGGRAVATION, MGC_HASTE_SELF, MGC_DISAPPEAR,
+            MGC_ENTOMB, MGC_SUMMON_MONS, MGC_TPORT_AWAY
+        };
+        return dispater_list[rn2(SIZE(dispater_list))];
+    }
+    else if (mtmp->data == &mons[PM_ASMODEUS]) {
+        if ((mtmp->mhp * 8 < mtmp->mhpmax)
+            || (mtmp->mhp * 3 < mtmp->mhpmax && !rn2(3)))
+            return MGC_CURE_SELF;
+        else if (!rn2(4))
+            return MGC_DARK_SPEECH;
+        else
+            return MGC_SHEER_COLD;
+    }
+    else if (mtmp->data == &mons[PM_DEMOGORGON]) {
+        int spellnum;
+        if ((mtmp->mhp * 8 < mtmp->mhpmax)
+            || (mtmp->mhp * 3 < mtmp->mhpmax && !rn2(3)))
+            return MGC_CURE_SELF;
+        /* Use the regular magic spells as the base, with a few filtered out,
+         * and allow casting dark speech. */
+        do {
+            spellnum = choose_magic_spell(rn2(mtmp->m_lev));
+        } while (spellnum == MGC_DISAPPEAR
+                 || spellnum == MGC_AGGRAVATION);
+        if (!rn2(4))
+            return MGC_DARK_SPEECH;
+        else
+            return spellnum;
+    }
+    else if (mtmp->data == &mons[PM_ORCUS]) {
+        int selection;
+        if ((mtmp->mhp * 8 < mtmp->mhpmax)
+            || (mtmp->mhp * 3 < mtmp->mhpmax && !rn2(3)))
+            return MGC_CURE_SELF;
+        static const int orcus_list[] = {
+            MGC_PSI_BOLT, MGC_BLIGHT, MGC_STUN_YOU, MGC_WEAKEN_YOU,
+            MGC_CURSE_ITEMS, MGC_SUMMON_MONS, MGC_DESTRY_ARMR, MGC_DEATH_TOUCH,
+            MGC_DISENCHANT
+        };
+        /* be intelligent; orcus's spells uniquely can penetrate Antimagic in a
+         * lot of cases, but not for certain spells that would be too nasty
+         * (such as destroying armor) */
+        do {
+            selection = orcus_list[rn2(SIZE(orcus_list))];
+        } while (selection == MGC_DESTRY_ARMR && m_seenres(mtmp, M_SEEN_MAGR));
+        return selection;
+    }
+    impossible("no special spell list for mon %s",
+               mtmp->data->pmnames[NEUTRAL]);
+    return MGC_PSI_BOLT; /* arbitrary since this should never be reached */
+}
+
 /* return values:
  * 1: successful spell
  * 0: unsuccessful spell
  */
 int
-castmu(register struct monst *mtmp,
-       register struct attack *mattk,
-       boolean thinks_it_foundyou,
-       boolean foundyou)
+castmu(
+    register struct monst *mtmp,   /* caster */
+    register struct attack *mattk, /* caster's current attack */
+    boolean thinks_it_foundyou,    /* might be mistaken if displaced */
+    boolean foundyou)              /* knows hero's precise location */
 {
     int dmg, ml = mtmp->m_lev;
     int ret;
@@ -198,11 +298,17 @@ castmu(register struct monst *mtmp,
         int cnt = 40;
 
         do {
-            spellnum = rn2(ml);
-            if (mattk->adtyp == AD_SPEL)
-                spellnum = choose_magic_spell(spellnum);
-            else
-                spellnum = choose_clerical_spell(spellnum);
+            if (has_special_spell_list(mtmp->data)) {
+                /* is demon lord or other special spellcaster */
+                spellnum = choose_special_spell(mtmp);
+            }
+            else {
+                spellnum = rn2(ml);
+                if (mattk->adtyp == AD_SPEL)
+                    spellnum = choose_magic_spell(spellnum);
+                else
+                    spellnum = choose_clerical_spell(spellnum);
+            }
             /* not trying to attack?  don't allow directed spells */
             if (!thinks_it_foundyou) {
                 if (!is_undirected_spell(mattk->adtyp, spellnum)
@@ -210,20 +316,20 @@ castmu(register struct monst *mtmp,
                     if (foundyou)
                         impossible(
                        "spellcasting monster found you and doesn't know it?");
-                    return 0;
+                    return M_ATTK_MISS;
                 }
                 break;
             }
         } while (--cnt > 0
                  && spell_would_be_useless(mtmp, mattk->adtyp, spellnum));
         if (cnt == 0)
-            return 0;
+            return M_ATTK_MISS;
     }
 
     /* monster unable to cast spells? */
     if (mtmp->mcan || mtmp->mspec_used || !ml) {
         cursetxt(mtmp, is_undirected_spell(mattk->adtyp, spellnum));
-        return 0;
+        return M_ATTK_MISS;
     }
 
     if (mattk->adtyp == AD_SPEL || mattk->adtyp == AD_CLRC) {
@@ -241,16 +347,19 @@ castmu(register struct monst *mtmp,
               canseemon(mtmp) ? Monnam(mtmp) : "Something",
               is_waterwall(mtmp->mux,mtmp->muy) ? "empty water"
                                                 : "thin air");
-        return 0;
+        return M_ATTK_MISS;
     }
 
     nomul(0);
     if (rn2(ml * 10) < (mtmp->mconf ? 100 : 20)) { /* fumbled attack */
+        Soundeffect(se_air_crackles, 60);
         if (canseemon(mtmp) && !Deaf)
             pline_The("air crackles around %s.", mon_nam(mtmp));
-        return 0;
+        return M_ATTK_MISS;
     }
-    if (canspotmon(mtmp) || !is_undirected_spell(mattk->adtyp, spellnum)) {
+    if ((canspotmon(mtmp) || !is_undirected_spell(mattk->adtyp, spellnum))
+        /* dark speech has its own casting message */
+        && spellnum != MGC_DARK_SPEECH) {
         pline("%s casts a spell%s!",
               canspotmon(mtmp) ? Monnam(mtmp) : "Something",
               is_undirected_spell(mattk->adtyp, spellnum)
@@ -274,7 +383,7 @@ castmu(register struct monst *mtmp,
             impossible(
               "%s casting non-hand-to-hand version of hand-to-hand spell %d?",
                        Monnam(mtmp), mattk->adtyp);
-            return 0;
+            return M_ATTK_MISS;
         }
     } else if (mattk->damd)
         dmg = d((int) ((ml / 2) + mattk->damn), (int) mattk->damd);
@@ -283,7 +392,7 @@ castmu(register struct monst *mtmp,
     if (Half_spell_damage)
         dmg = (dmg + 1) / 2;
 
-    ret = 1;
+    ret = M_ATTK_HIT;
     switch (mattk->adtyp) {
     case AD_FIRE:
         pline("You're enveloped in flames.");
@@ -296,13 +405,7 @@ castmu(register struct monst *mtmp,
         burn_away_slime();
         break;
     case AD_COLD:
-        pline("You're covered in frost.");
-        if (Cold_resistance) {
-            shieldeff(u.ux, u.uy);
-            pline("But you resist the effects.");
-            monstseesu(M_SEEN_COLD);
-            dmg = 0;
-        }
+        sheer_cold(&dmg);
         break;
     case AD_MAGM:
         You("are hit by a shower of missiles!");
@@ -347,25 +450,66 @@ m_cure_self(struct monst *mtmp, int dmg)
     return dmg;
 }
 
+/* unlike the finger of death spell which behaves like a wand of death,
+   this monster spell only attacks the hero */
 void
-touch_of_death(void)
+touch_of_death(struct monst *mtmp)
 {
+    char kbuf[BUFSZ];
     int dmg = 50 + d(8, 6);
     int drain = dmg / 2;
 
+    /* if we get here, we know that hero isn't magic resistant and isn't
+       poly'd into an undead or demon */
     You_feel("drained...");
+    (void) death_inflicted_by(kbuf, "the touch of death", mtmp);
 
-    if (drain >= u.uhpmax) {
-        g.killer.format = KILLED_BY_AN;
-        Strcpy(g.killer.name, "touch of death");
+    if (Upolyd) {
+        u.mh = 0;
+        rehumanize(); /* fatal iff Unchanging */
+    } else if (drain >= u.uhpmax) {
+        gk.killer.format = KILLED_BY;
+        Strcpy(gk.killer.name, kbuf);
         done(DIED);
     } else {
         u.uhpmax -= drain;
-        losehp(dmg, "touch of death", KILLED_BY_AN);
+        losehp(dmg, kbuf, KILLED_BY);
     }
+    gk.killer.name[0] = '\0'; /* not killed if we get here... */
 }
 
-/* monster wizard and cleric spellcasting functions */
+/* give a reason for death by some monster spells */
+char *
+death_inflicted_by(
+    char *outbuf,            /* assumed big enough; pm_names are short */
+    const char *deathreason, /* cause of death */
+    struct monst *mtmp)      /* monster who caused it */
+{
+    Strcpy(outbuf, deathreason);
+    if (mtmp) {
+        struct permonst *mptr = mtmp->data,
+            *champtr = (mtmp->cham >= LOW_PM) ? &mons[mtmp->cham] : mptr;
+        const char *realnm = pmname(champtr, Mgender(mtmp)),
+            *fakenm = pmname(mptr, Mgender(mtmp));
+
+        /* greatly simplified extract from done_in_by(), primarily for
+           reason for death due to 'touch of death' spell; if mtmp is
+           shape changed, it won't be a vampshifter or mimic since they
+           can't cast spells */
+        if (!type_is_pname(champtr) && !the_unique_pm(mptr))
+            realnm = an(realnm);
+        Sprintf(eos(outbuf), " inflicted by %s%s",
+                the_unique_pm(mptr) ? "the " : "", realnm);
+        if (champtr != mptr)
+            Sprintf(eos(outbuf), " imitating %s", an(fakenm));
+    }
+    return outbuf;
+}
+
+/*
+ * Monster wizard and cleric spellcasting functions.
+ */
+
 /*
    If dmg is zero, then the monster is not casting at you.
    If the monster is intentionally not casting at you, we have previously
@@ -378,6 +522,10 @@ static
 void
 cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
 {
+    /* Orcus's casting often bypasses Antimagic or has some other effect on
+     * spells */
+    const boolean orcus = (mtmp->data == &mons[PM_ORCUS]);
+
     if (dmg == 0 && !is_undirected_spell(AD_SPEL, spellnum)) {
         impossible("cast directed wizard spell (%d) with dmg=0?", spellnum);
         return;
@@ -386,14 +534,14 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
     switch (spellnum) {
     case MGC_DEATH_TOUCH:
         pline("Oh no, %s's using the touch of death!", mhe(mtmp));
-        if (nonliving(g.youmonst.data) || is_demon(g.youmonst.data)
-            || g.youmonst.data->mlet == S_ANGEL) {
+        if (nonliving(gy.youmonst.data) || is_demon(gy.youmonst.data)
+            || gy.youmonst.data->mlet == S_ANGEL) {
             You("seem no deader than before.");
-        } else if (!Antimagic && rn2(mtmp->m_lev) > 12) {
+        } else if ((!Antimagic || orcus) && rn2(mtmp->m_lev) > 12) {
             if (Hallucination) {
                 You("have an out of body experience.");
             } else {
-                touch_of_death();
+                touch_of_death(mtmp);
             }
         } else {
             if (Antimagic) {
@@ -405,7 +553,7 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
         dmg = 0;
         break;
     case MGC_CLONE_WIZ:
-        if (mtmp->iswiz && g.context.no_of_wizards == 1) {
+        if (mtmp->iswiz && gc.context.no_of_wizards == 1) {
             pline("Double Trouble...");
             clonewiz();
             dmg = 0;
@@ -413,7 +561,15 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
             impossible("bad wizard cloning?");
         break;
     case MGC_SUMMON_MONS:
-        (void) nasty(mtmp); /* summon something nasty */
+        if (orcus) {
+            coord yourloc = { u.ux, u.uy };
+            mkundead(&yourloc, TRUE, NO_MINVENT);
+            /* TODO: "The dead emerge from the ground!" message? suppress
+             * existing msg
+             * with mm flags? */
+        }
+        else
+            (void) nasty(mtmp); /* summon something nasty */
         dmg = 0;
         break;
     case MGC_AGGRAVATION:
@@ -431,24 +587,29 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
             shieldeff(u.ux, u.uy);
             monstseesu(M_SEEN_MAGR);
             pline("A field of force surrounds you!");
-        } else if (!destroy_arm(some_armor(&g.youmonst), FALSE)) {
+        } else if (!destroy_arm(some_armor(&gy.youmonst), FALSE)) {
             Your("skin itches.");
         }
         dmg = 0;
         break;
     case MGC_WEAKEN_YOU: /* drain strength */
-        if (Antimagic) {
+        if (Antimagic && !orcus) {
             shieldeff(u.ux, u.uy);
             monstseesu(M_SEEN_MAGR);
             You_feel("momentarily weakened.");
         } else {
+            char kbuf[BUFSZ];
+
             You("suddenly feel weaker!");
             dmg = mtmp->m_lev - 6;
+            if (dmg < 1) /* paranoia since only chosen when m_lev is high */
+                dmg = 1;
             if (Half_spell_damage)
                 dmg = (dmg + 1) / 2;
-            losestr(rnd(dmg));
-            if (u.uhp < 1)
-                done_in_by(mtmp, DIED);
+            losestr(rnd(dmg),
+                    death_inflicted_by(kbuf, "strength loss", mtmp),
+                    KILLED_BY);
+            gk.killer.name[0] = '\0'; /* not killed if we get here... */
         }
         dmg = 0;
         break;
@@ -465,7 +626,7 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
             impossible("no reason for monster to cast disappear spell?");
         break;
     case MGC_STUN_YOU:
-        if (Antimagic || Free_action) {
+        if ((Antimagic && !orcus) || Free_action) {
             shieldeff(u.ux, u.uy);
             monstseesu(M_SEEN_MAGR);
             if (!Stunned)
@@ -504,6 +665,178 @@ cast_wizard_spell(struct monst *mtmp, int dmg, int spellnum)
         else
             Your("%s suddenly aches very painfully!", body_part(HEAD));
         break;
+    case MGC_TPORT_AWAY: {
+        /* this is better than reimplementing the logic of rloc to pick a random
+         * spot that is sufficiently far away from (mux, muy) */
+        xint8 tries = 3;
+        do {
+            rloc(mtmp, RLOC_MSG);
+        } while (--tries
+                 && dist2(mtmp->mx, mtmp->my, mtmp->mux, mtmp->muy) < 10);
+        dmg = 0;
+        break;
+    }
+    case MGC_ENTOMB: {
+        /* entomb you in rocks (and maybe a couple diggable walls) to delay you
+         * and allow some time for the caster to get away */
+        coordxy x, y;
+        pline_The("ground shakes violently%s!",
+                  Blind ? "" : " and twists into walls");
+        if (!Blind)
+            pline("Boulders fall from above!");
+        for (x = u.ux - 1; x <= u.ux + 1; ++x) {
+            for (y = u.uy - 1; y <= u.uy + 1; ++y) {
+                if (!SPACE_POS(levl[x][y].typ))
+                    continue;
+                if (x == u.ux && y == u.uy)
+                    continue;
+                /* Only create actual walls where there is no monster or object
+                 * or trap in the way. */
+                if (!rn2(6) && levl[x][y].typ == ROOM && !m_at(x, y)
+                    && !gl.level.objects[x][y] && !t_at(x, y)) {
+                    levl[x][y].typ = rn2(2) ? HWALL : VWALL;
+                    levl[x][y].wall_info &= ~W_NONDIGGABLE;
+                    newsym(x, y);
+                }
+                else {
+                    if (rn2(5))
+                        drop_boulder_on_monster(x, y, FALSE, FALSE);
+                    if (rn2(3))
+                        drop_boulder_on_monster(x, y, FALSE, FALSE);
+                }
+            }
+        }
+        if (rn2(4))
+            drop_boulder_on_player(FALSE, FALSE, FALSE, FALSE);
+        dmg = 0;
+        break;
+    }
+    case MGC_DARK_SPEECH:
+        if (Blind) {
+            if (Deaf)
+                ; /* nothing */
+            else
+                pline("Something intones a terrible chant!");
+        }
+        else {
+            pline("%s raises a %s towards you and %s", Monnam(mtmp),
+                  mbodypart(mtmp, HAND),
+                  Deaf ? "appears to chant something."
+                       : "intones a terrible chant!");
+        }
+        pline("Dark energy surrounds you...");
+        switch (rn2(5)) {
+        case 0:
+            attrcurse();
+            break;
+        case 1:
+            You("%s rapidly decomposing!", Withering ? "continue" : "begin");
+            incr_itimeout(&HWithering, rn1(40, 100));
+            break;
+        case 2:
+            Your("mind twists!");
+            losehp(d((Deaf ? 4 : 8), 6), "hearing the Dark Speech", KILLED_BY);
+            make_confused((HConfusion & TIMEOUT) + rnd(30), FALSE);
+            make_stunned((HStun & TIMEOUT) + rnd(30), TRUE);
+            break;
+        case 3:
+            You("are overwhelmed with a sense of doom...");
+            if (Doomed)
+                change_luck(-2);
+            else
+                set_itimeout(&Doomed, rn1(2000, 500));
+            break;
+        case 4:
+            {
+                boolean was_blind_before = Blind;
+                /* this handles all the vision recalc stuff */
+                make_blinded(1L, FALSE);
+                HBlinded |= FROMOUTSIDE;
+                if (!Blind)
+                    /* wearing Eyes of the Overworld - no effect, undo it */
+                    HBlinded &= ~FROMOUTSIDE;
+                else if (!was_blind_before)
+                    You("can no longer see.");
+                break;
+            }
+        }
+        dmg = 0;
+        break;
+    case MGC_SHEER_COLD:
+        sheer_cold(&dmg);
+        break;
+    case MGC_BLIGHT:
+        /* one of dark speech's effects */
+        You("%s rapidly decomposing!", Withering ? "continue" : "begin");
+        incr_itimeout(&HWithering, rn1(40, 100));
+        dmg = 0;
+        break;
+    case MGC_DISENCHANT: {
+        /* 40% chance of zapping enchantment from current wielded weapon
+         * 45% chance from random piece of worn gear
+         * 15% chance of taking it from a random charged ring, charged tool,
+         * wand, or unequipped weapon or armor */
+        struct obj *targ = (struct obj *) 0;
+        short loss = rnd(3);
+        const schar MIN_SPE1 = -7; /* for worn gear */
+        const schar MIN_SPE2 = 0;  /* for tools & wands */
+        schar floor = MIN_SPE1;
+        if (uwep && uwep->spe > MIN_SPE1 && percent(40))
+            targ = uwep;
+        else if ((targ = some_armor(&gy.youmonst)) && targ->spe > MIN_SPE1
+                 && percent(75))
+            ; /* targ already selected */
+        else {
+            struct obj *otmp;
+            int choices = 0;
+            for (otmp = gi.invent; otmp; otmp = otmp->nobj) {
+                short oclass = objects[otmp->otyp].oc_class;
+                if ((oclass == RING_CLASS && objects[otmp->otyp].oc_charged)
+                    || (oclass == TOOL_CLASS && is_weptool(otmp))) {
+                    /* weptools and charged rings use the same rules for weapons
+                     * and armor */
+                    if (otmp->spe > MIN_SPE1 && !rn2(++choices)) {
+                        targ = otmp;
+                        floor = MIN_SPE1;
+                    }
+                }
+                else if (oclass == WAND_CLASS
+                         || (oclass == TOOL_CLASS
+                             && objects[otmp->otyp].oc_charged
+                             && objects[otmp->otyp].oc_magic)) {
+                    /* wands and charged tools do not use the same rules since
+                     * negative spe doesn't make sense for them (well, it does
+                     * for wands, but that would mix this up with cancellation
+                     */
+                    if (otmp->spe > MIN_SPE2 && !rn2(++choices)) {
+                        targ = otmp;
+                        floor = MIN_SPE2;
+                        /* account for tools and wands which have a higher
+                         * number of charges than normal, or have been recharged
+                         * beyond their normal amount */
+                        loss = max(loss, otmp->spe / 3);
+                    }
+                }
+            }
+        }
+        if (!targ)
+            /* couldn't find anything to disenchant... */
+            break;
+        if (targ->spe > 0) {
+            pline("%s absorbs magic energies from %s!", Monnam(mtmp),
+                  yname(targ));
+            mtmp->mspec_used = max(mtmp->mspec_used - loss, 0);
+            floor = 0;
+        }
+        else {
+            pline("%s glows black.", Yname2(targ));
+        }
+        targ->spe = max(floor, targ->spe - loss);
+        if (targ->spe < 0)
+            curse(targ);
+        dmg = 0;
+        break;
+    }
     default:
         impossible("mcastu: invalid magic spell (%d)", spellnum);
         dmg = 0;
@@ -536,12 +869,12 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
             dmg = (dmg + 1) / 2;
         if (u.umonnum == PM_IRON_GOLEM) {
             You("rust!");
-            Strcpy(g.killer.name, "rusted away");
-            g.killer.format = NO_KILLER_PREFIX;
+            Strcpy(gk.killer.name, "rusted away");
+            gk.killer.format = NO_KILLER_PREFIX;
             rehumanize();
             dmg = 0; /* prevent further damage after rehumanization */
         }
-        erode_armor(&g.youmonst, ERODE_RUST);
+        erode_armor(&gy.youmonst, ERODE_RUST);
         break;
     case CLC_FIRE_PILLAR:
         pline("A pillar of fire strikes all around you!");
@@ -554,12 +887,13 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
         if (Half_spell_damage)
             dmg = (dmg + 1) / 2;
         burn_away_slime();
-        (void) burnarmor(&g.youmonst);
-        (void) destroy_items(&g.youmonst, AD_FIRE, orig_dmg);
-        ignite_items(g.invent);
+        (void) burnarmor(&gy.youmonst);
+        (void) destroy_items(&gy.youmonst, AD_FIRE, orig_dmg);
+        ignite_items(gi.invent);
         (void) burn_floor_objects(u.ux, u.uy, TRUE, FALSE);
         break;
     case CLC_LIGHTNING: {
+        Soundeffect(se_bolt_of_lightning, 80);
         pline("A bolt of lightning strikes down at you from above!");
         const char* reflectsrc = ureflectsrc();
         orig_dmg = dmg = d(8, 6);
@@ -575,7 +909,7 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
         }
         if (Half_spell_damage)
             dmg = (dmg + 1) / 2;
-        (void) destroy_items(&g.youmonst, AD_ELEC, orig_dmg);
+        (void) destroy_items(&gy.youmonst, AD_ELEC, orig_dmg);
         (void) flashburn((long) rnd(100));
         break;
     }
@@ -603,7 +937,8 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
             if (!enexto(&bypos, mtmp->mux, mtmp->muy, mtmp->data))
                 break;
             if ((pm = mkclass(let, 0)) != 0
-                && (mtmp2 = makemon(pm, bypos.x, bypos.y, MM_ANGRY|MM_NOMSG)) != 0) {
+                && (mtmp2 = makemon(pm, bypos.x, bypos.y, MM_ANGRY | MM_NOMSG))
+                   != 0) {
                 success = TRUE;
                 mtmp2->msleeping = mtmp2->mpeaceful = mtmp2->mtame = 0;
                 set_malign(mtmp2);
@@ -631,11 +966,13 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
                 /* unseen caster summoned seen critter(s) */
                 arg = (newseen == oldseen + 1) ? an(makesingular(what))
                                                : whatbuf;
-                if (!Deaf)
+                if (!Deaf) {
+                    Soundeffect(se_someone_summoning, 100);
                     You_hear("someone summoning something, and %s %s.", arg,
                              vtense(arg, "appear"));
-                else
+                } else {
                     pline("%s %s.", upstart(arg), vtense(arg, "appear"));
+                }
             }
 
         /* seen caster, possibly producing unseen--or just one--critters;
@@ -665,7 +1002,8 @@ cast_cleric_spell(struct monst *mtmp, int dmg, int spellnum)
     case CLC_BLIND_YOU:
         /* note: resists_blnd() doesn't apply here */
         if (!Blinded) {
-            int num_eyes = eyecount(g.youmonst.data);
+            int num_eyes = eyecount(gy.youmonst.data);
+
             pline("Scales cover your %s!", (num_eyes == 1)
                                                ? body_part(EYE)
                                                : makeplural(body_part(EYE)));
@@ -748,6 +1086,13 @@ is_undirected_spell(unsigned int adtyp, int spellnum)
         case MGC_DISAPPEAR:
         case MGC_HASTE_SELF:
         case MGC_CURE_SELF:
+        case MGC_TPORT_AWAY:
+        case MGC_ENTOMB:
+        /* note that if MGC_SHEER_COLD were to appear here, it could be cast at
+         * range, but would deal 0 damage, because of the castmu code that sets
+         * damage to 0 if !foundyou, which it is when castmu is called from
+         * monmove. This might be possible to kludge around. */
+        case MGC_DARK_SPEECH:
             return TRUE;
         default:
             break;
@@ -802,7 +1147,7 @@ spell_would_be_useless(struct monst *mtmp, unsigned int adtyp, int spellnum)
         if (!mcouldseeu && (spellnum == MGC_SUMMON_MONS
                             || (!mtmp->iswiz && spellnum == MGC_CLONE_WIZ)))
             return TRUE;
-        if ((!mtmp->iswiz || g.context.no_of_wizards > 1)
+        if ((!mtmp->iswiz || gc.context.no_of_wizards > 1)
             && spellnum == MGC_CLONE_WIZ)
             return TRUE;
         /* aggravation (global wakeup) when everyone is already active */
@@ -814,6 +1159,17 @@ spell_would_be_useless(struct monst *mtmp, unsigned int adtyp, int spellnum)
             if (!has_aggravatables(mtmp))
                 return rn2(100) ? TRUE : FALSE;
         }
+        /* don't teleport away if already sufficiently far away */
+        if (spellnum == MGC_TPORT_AWAY
+            && dist2(mtmp->mx, mtmp->my, mtmp->mux, mtmp->muy) >= 10)
+            return TRUE;
+        /* don't entomb if hero is already entombed */
+        if (spellnum == MGC_ENTOMB && is_entombed(u.ux, u.uy))
+            return TRUE;
+        /* sheer cold and dark speech require line of sight */
+        if (!mcouldseeu && (spellnum == MGC_DARK_SPEECH
+                            || spellnum == MGC_SHEER_COLD))
+            return TRUE;
     } else if (adtyp == AD_CLRC) {
         /* summon insects/sticks to snakes won't be cast by peaceful monsters
          */
@@ -832,34 +1188,66 @@ spell_would_be_useless(struct monst *mtmp, unsigned int adtyp, int spellnum)
     return FALSE;
 }
 
-/* convert 1..10 to 0..9; add 10 for second group (spell casting) */
-#define ad_to_typ(k) (10 + (int) k - 1)
-
 /* monster uses spell (ranged) */
 int
-buzzmu(register struct monst *mtmp, register struct attack *mattk)
+buzzmu(struct monst *mtmp, struct attack *mattk)
 {
     /* don't print constant stream of curse messages for 'normal'
        spellcasting monsters at range */
-    if (mattk->adtyp > AD_SPC2)
-        return 0;
+    if (!BZ_VALID_ADTYP(mattk->adtyp))
+        return M_ATTK_MISS;
 
-    if (mtmp->mcan) {
+    if (mtmp->mcan || m_seenres(mtmp, cvt_adtyp_to_mseenres(mattk->adtyp))) {
         cursetxt(mtmp, FALSE);
-        return 0;
+        return M_ATTK_MISS;
     }
     if (lined_up(mtmp) && rn2(3)) {
         nomul(0);
-        if (mattk->adtyp && (mattk->adtyp < 11)) { /* no cf unsigned >0 */
-            if (canseemon(mtmp))
-                pline("%s zaps you with a %s!", Monnam(mtmp),
-                      flash_str(ad_to_typ(mattk->adtyp), FALSE));
-            buzz(-ad_to_typ(mattk->adtyp), (int) mattk->damn, mtmp->mx,
-                 mtmp->my, sgn(g.tbx), sgn(g.tby));
-        } else
-            impossible("Monster spell %d cast", mattk->adtyp - 1);
+        if (canseemon(mtmp))
+            pline("%s zaps you with a %s!", Monnam(mtmp),
+                  flash_str(BZ_OFS_AD(mattk->adtyp), FALSE));
+        gb.buzzer = mtmp;
+        buzz(BZ_M_SPELL(BZ_OFS_AD(mattk->adtyp)), (int) mattk->damn,
+             mtmp->mx, mtmp->my, sgn(gt.tbx), sgn(gt.tby));
+        gb.buzzer = 0;
+        return M_ATTK_HIT;
     }
-    return 1;
+    return M_ATTK_MISS;
+}
+
+/* is (x,y) entombed (completely surrounded by boulders or nonwalkable spaces)?
+ * note that (x,y) itself is not checked */
+static boolean
+is_entombed(coordxy x, coordxy y)
+{
+    coordxy xx, yy;
+    for (xx = x - 1; xx <= x + 1; xx++) {
+        for (yy = y - 1; yy <= y + 1; yy++) {
+            if (isok(xx, yy) && xx != x && yy != y
+                && SPACE_POS(levl[xx][yy].typ) && !sobj_at(BOULDER, xx, yy))
+                return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+/* extracted from castmu; if the corresponding flame spell is ever used and
+ * treated as one of several possible spells in a demon lord's repertoire, it
+ * should also probably be extracted.
+ * The function expects *dmg to be the already rolled amount of damage the spell
+ * will deliver by default. It may adjust *dmg in the process; the caller should
+ * anticipate this. */
+static void
+sheer_cold(int *dmg)
+{
+    pline("You're covered in frigid frost.");
+    if (Cold_resistance) {
+        shieldeff(u.ux, u.uy);
+        pline("You partially resist the effects.");
+        monstseesu(M_SEEN_COLD);
+        *dmg /= 4;
+    }
+    destroy_items(&gy.youmonst, AD_COLD, *dmg);
 }
 
 /*mcastu.c*/

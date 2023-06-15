@@ -24,7 +24,7 @@
 static long final_fpos; /* [note: do not move this to the 'g' struct] */
 #endif
 
-#define done_stopprint g.program_state.stopprint
+#define done_stopprint gp.program_state.stopprint
 
 #define newttentry() (struct toptenentry *) alloc(sizeof (struct toptenentry))
 #define dealloc_ttentry(ttent) free((genericptr_t) (ttent))
@@ -83,7 +83,7 @@ static void nsb_mung_line(char *);
 static void nsb_unmung_line(char *);
 #endif
 
-/* "killed by",&c ["an"] 'g.killer.name' */
+/* "killed by",&c ["an"] 'gk.killer.name' */
 void
 formatkiller(
     char *buf,
@@ -102,12 +102,12 @@ formatkiller(
         "", "", "", "", ""
     };
     unsigned l;
-    char c, *kname = g.killer.name;
+    char c, *kname = gk.killer.name;
 
     buf[0] = '\0'; /* lint suppression */
-    switch (g.killer.format) {
+    switch (gk.killer.format) {
     default:
-        impossible("bad killer format? (%d)", g.killer.format);
+        impossible("bad killer format? (%d)", gk.killer.format);
         /*FALLTHRU*/
     case NO_KILLER_PREFIX:
         break;
@@ -145,12 +145,12 @@ formatkiller(
     }
     *buf = '\0';
 
-    if (incl_helpless && g.multi) {
+    if (incl_helpless && gm.multi < 0) {
         /* X <= siz: 'sizeof "string"' includes 1 for '\0' terminator */
-        if (g.multi_reason
-            && strlen(g.multi_reason) + sizeof ", while " <= siz)
-            Sprintf(buf, ", while %s", g.multi_reason);
-        /* either g.multi_reason wasn't specified or wouldn't fit */
+        if (gm.multi_reason
+            && strlen(gm.multi_reason) + sizeof ", while " <= siz)
+            Sprintf(buf, ", while %s", gm.multi_reason);
+        /* either gm.multi_reason wasn't specified or wouldn't fit */
         else if (sizeof ", while helpless" <= siz)
             Strcpy(buf, ", while helpless");
         /* else extra death info won't fit, so leave it out */
@@ -160,23 +160,23 @@ formatkiller(
 static void
 topten_print(const char *x)
 {
-    if (g.toptenwin == WIN_ERR)
+    if (gt.toptenwin == WIN_ERR)
         raw_print(x);
     else
-        putstr(g.toptenwin, ATR_NONE, x);
+        putstr(gt.toptenwin, ATR_NONE, x);
 }
 
 static void
 topten_print_bold(const char *x)
 {
-    if (g.toptenwin == WIN_ERR)
+    if (gt.toptenwin == WIN_ERR)
         raw_print_bold(x);
     else
-        putstr(g.toptenwin, ATR_BOLD, x);
+        putstr(gt.toptenwin, ATR_BOLD, x);
 }
 
 int
-observable_depth(d_level* lev)
+observable_depth(d_level *lev)
 {
 #if 0
     /* if we ever randomize the order of the elemental planes, we
@@ -201,7 +201,7 @@ observable_depth(d_level* lev)
 
 /* throw away characters until current record has been entirely consumed */
 static void
-discardexcess(FILE* rfile)
+discardexcess(FILE *rfile)
 {
     int c;
 
@@ -213,10 +213,10 @@ discardexcess(FILE* rfile)
 DISABLE_WARNING_FORMAT_NONLITERAL
 
 static void
-readentry(FILE* rfile, struct toptenentry* tt)
+readentry(FILE *rfile, struct toptenentry *tt)
 {
     char inbuf[SCANBUFSZ], s1[SCANBUFSZ], s2[SCANBUFSZ], s3[SCANBUFSZ],
-        s4[SCANBUFSZ], s5[SCANBUFSZ], s6[SCANBUFSZ];
+         s4[SCANBUFSZ], s5[SCANBUFSZ], s6[SCANBUFSZ];
 
 #ifdef NO_SCAN_BRACK /* Version_ Pts DgnLevs_ Hp___ Died__Born id */
     static const char fmt[] = "%d %d %d %ld %d %d %d %d %d %d %ld %ld %d%*c";
@@ -247,7 +247,7 @@ readentry(FILE* rfile, struct toptenentry* tt)
         if (!fgets(inbuf, sizeof inbuf, rfile)) {
             /* sscanf will fail and tt->points will be set to 0 */
             *inbuf = '\0';
-        } else if (!index(inbuf, '\n')) {
+        } else if (!strchr(inbuf, '\n')) {
             Strcpy(&inbuf[sizeof inbuf - 2], "\n");
             discardexcess(rfile);
         }
@@ -294,7 +294,7 @@ readentry(FILE* rfile, struct toptenentry* tt)
 }
 
 static void
-writeentry(FILE* rfile, struct toptenentry* tt)
+writeentry(FILE *rfile, struct toptenentry *tt)
 {
     static const char fmt32[] = "%c%c ";        /* role,gender */
     static const char fmt33[] = "%s %s %s %s "; /* role,race,gndr,algn */
@@ -331,15 +331,16 @@ RESTORE_WARNING_FORMAT_NONLITERAL
 
 #ifdef XLOGFILE
 
-/* as tab is never used in eg. g.plname or death, no need to mangle those. */
+/* as tab is never used in eg. gp.plname or death, no need to mangle those. */
 static void
-writexlentry(FILE* rfile, struct toptenentry* tt, int how)
+writexlentry(FILE *rfile, struct toptenentry *tt, int how)
 {
 #define Fprintf (void) fprintf
 #define XLOG_SEP '\t' /* xlogfile field separator. */
+#define XNH_EXTRA_ACHIEVEMENTS 2
     char buf[BUFSZ], tmpbuf[DTHSZ + 1];
     char stuck = (Upolyd && Unchanging);
-    char achbuf[N_ACH * 40];
+    char achbuf[(N_ACH + XNH_EXTRA_ACHIEVEMENTS) * 40];
 
     Sprintf(buf, "version=%d.%d.%d", tt->ver_major, tt->ver_minor,
             tt->patchlevel);
@@ -358,12 +359,10 @@ writexlentry(FILE* rfile, struct toptenentry* tt, int how)
     formatkiller(tmpbuf, sizeof tmpbuf, how, FALSE);
     Fprintf(rfile, "%s%cname=%s%cdeath=%s",
             buf, /* (already includes separator) */
-            XLOG_SEP, g.plname, XLOG_SEP, tmpbuf);
-    if (g.multi || stuck) {
-        const char* helpless = (g.multi ? (g.multi_reason ? g.multi_reason
-                                                        : "helpless")
-                                      : "");
-        const char* and = (g.multi && stuck && !Polyinit_mode) ? " and " : "";
+            XLOG_SEP, gp.plname, XLOG_SEP, tmpbuf);
+    if (gm.multi < 0 || stuck) {
+        const char* helpless = gm.multi_reason ? gm.multi_reason : "helpless";
+        const char* and = (gm.multi && stuck && !Polyinit_mode) ? " and " : "";
         tmpbuf[0] = '\0';
         if (stuck && !Polyinit_mode)
             Sprintf(tmpbuf, "stuck in %s form",
@@ -372,7 +371,7 @@ writexlentry(FILE* rfile, struct toptenentry* tt, int how)
         Fprintf(rfile, "%cwhile=%s%s%s", XLOG_SEP, helpless, and, tmpbuf);
     }
     Fprintf(rfile, "%cconduct=0x%lx%cturns=%ld%cachieve=0x%lx", XLOG_SEP,
-            encodeconduct(), XLOG_SEP, g.moves, XLOG_SEP,
+            encodeconduct(), XLOG_SEP, gm.moves, XLOG_SEP,
             encodeachieve(FALSE));
     Fprintf(rfile, "%cachieveX=%s", XLOG_SEP,
             encode_extended_achievements(achbuf));
@@ -387,7 +386,7 @@ writexlentry(FILE* rfile, struct toptenentry* tt, int how)
             aligns[1 - u.ualignbase[A_ORIGINAL]].filecode);
     Fprintf(rfile, "%cflags=0x%lx", XLOG_SEP, encodexlogflags());
     Fprintf(rfile, "%cgold=%ld", XLOG_SEP,
-            money_cnt(g.invent) + hidden_gold(TRUE));
+            money_cnt(gi.invent) + hidden_gold(TRUE));
     Fprintf(rfile, "%cwish_cnt=%ld", XLOG_SEP, u.uconduct.wishes);
     Fprintf(rfile, "%carti_wish_cnt=%ld", XLOG_SEP, u.uconduct.wisharti);
     Fprintf(rfile, "%cbones=%ld", XLOG_SEP, u.uroleplay.numbones);
@@ -451,11 +450,13 @@ encodeconduct(void)
        reporting "obeyed sokoban rules" is misleading if sokoban wasn't
        completed or at least attempted; however, suppressing that when
        sokoban was never entered, as we do here, risks reporting
-       "violated sokoban rules" when no such thing occured; this can
+       "violated sokoban rules" when no such thing occurred; this can
        be disambiguated in xlogfile post-processors by testing the
        entered-sokoban bit in the 'achieve' field */
     if (!u.uconduct.sokocheat && sokoban_in_play())
         e |= 1L << 12;
+    if (!u.uconduct.pets)
+        e |= 1L << 13;
 
     /* Starting in xNetHack 6.0, xNetHack-specific flags start at the highest
      * bits and grow downward, while vanilla flags still start at the lowest bit
@@ -609,12 +610,30 @@ encode_extended_achievements(char *buf)
         add_achieveX(buf, achievement, TRUE);
     }
 
+    /* put xNetHack specific achievements for Junethack here; when doing so,
+     * increment XNH_EXTRA_ACHIEVEMENTS */
     /* Junethack 2021 shim: record quest completion in achieveX without making
      * it a formal achievement (because vanilla NetHack might add it as an
      * actual achievement and only one achievement slot remains at the moment).
      */
     if (u.uevent.qcompleted) {
         add_achieveX(buf, "completed_quest", TRUE);
+    }
+    for (i = FIRST_ARCHFIEND; i <= LAST_ARCHFIEND; ++i) {
+        /* this sort of imitates the logic of fiend_adversity, but with
+         * modifications - and active_fiends will not do here because it only
+         * becomes > 0 when you get the Amulet; you can kill all the archfiends
+         * without getting the Amulet */
+        struct fiend_info *fnd = lookup_fiend(i);
+        if (fnd->escaped || fnd->num_in_dgn > 0 || gm.mvitals[i].born == 0)
+            /* did not dispatch the fiend */
+            break;
+        if (gm.mvitals[i].born > gm.mvitals[i].died)
+            /* bribed, doesn't count for the achievement */
+            break;
+    }
+    if (i > LAST_ARCHFIEND) { /* completed loop, all archfiends killed off */
+        add_achieveX(buf, "killed_all_archfiends", TRUE);
     }
 
     return buf;
@@ -639,6 +658,7 @@ encode_extended_conducts(char *buf)
     if (sokoban_in_play())
         add_achieveX(buf, "sokoban",  !u.uconduct.sokocheat);
     add_achieveX(buf, "blind",        u.uroleplay.blind);
+    add_achieveX(buf, "deaf",         u.uroleplay.deaf);
     add_achieveX(buf, "nudist",       u.uroleplay.nudist);
     add_achieveX(buf, "bonesless",    !u.uroleplay.numbones);
     add_achieveX(buf, "petless",      !u.uconduct.pets);
@@ -656,7 +676,7 @@ encode_extended_conducts(char *buf)
 #endif /* XLOGFILE */
 
 static void
-free_ttlist(struct toptenentry* tt)
+free_ttlist(struct toptenentry *tt)
 {
     struct toptenentry *ttnext;
 
@@ -693,15 +713,15 @@ topten(int how, time_t when)
      * topten uses alloc() several times, which will lead to
      * problems if the panic was the result of an alloc() failure.
      */
-    if (g.program_state.panicking)
+    if (gp.program_state.panicking)
         return;
 
     if (iflags.toptenwin) {
-        g.toptenwin = create_nhwindow(NHW_TEXT);
+        gt.toptenwin = create_nhwindow(NHW_TEXT);
     }
 
-#if defined(UNIX) || defined(VMS) || defined(__EMX__)
-#define HUP if (!g.program_state.done_hup)
+#if defined(HANGUPHANDLING)
+#define HUP if (!gp.program_state.done_hup)
 #else
 #define HUP
 #endif
@@ -730,11 +750,11 @@ topten(int how, time_t when)
     t0->maxhp = u.uhpmax;
     t0->deaths = u.umortality;
     t0->uid = uid;
-    copynchars(t0->plrole, g.urole.filecode, ROLESZ);
-    copynchars(t0->plrace, g.urace.filecode, ROLESZ);
+    copynchars(t0->plrole, gu.urole.filecode, ROLESZ);
+    copynchars(t0->plrace, gu.urace.filecode, ROLESZ);
     copynchars(t0->plgend, genders[flags.female].filecode, ROLESZ);
     copynchars(t0->plalign, aligns[1 - u.ualign.type].filecode, ROLESZ);
-    copynchars(t0->name, g.plname, NAMSZ);
+    copynchars(t0->name, gp.plname, NAMSZ);
     formatkiller(t0->death, sizeof t0->death, how, TRUE);
     t0->birthdate = yyyymmdd(ubirthday);
     t0->deathdate = yyyymmdd(when);
@@ -952,7 +972,7 @@ topten(int how, time_t when)
  showwin:
     if (!done_stopprint) {
         if (iflags.toptenwin) {
-            display_nhwindow(g.toptenwin, TRUE);
+            display_nhwindow(gt.toptenwin, TRUE);
         } else {
             /* when not a window, we need something comparable to more()
                but can't use it directly because we aren't dealing with
@@ -964,8 +984,8 @@ topten(int how, time_t when)
     if (!t0_used)
         dealloc_ttentry(t0);
     if (iflags.toptenwin) {
-        destroy_nhwindow(g.toptenwin);
-        g.toptenwin = WIN_ERR;
+        destroy_nhwindow(gt.toptenwin);
+        gt.toptenwin = WIN_ERR;
     }
 }
 
@@ -987,7 +1007,7 @@ DISABLE_WARNING_FORMAT_NONLITERAL
 
 /* so>0: standout line; so=0: ordinary line */
 static void
-outentry(int rank, struct toptenentry* t1, boolean so)
+outentry(int rank, struct toptenentry *t1, boolean so)
 {
     boolean second_line = TRUE;
     char linebuf[BUFSZ];
@@ -1019,7 +1039,7 @@ outentry(int rank, struct toptenentry* t1, boolean so)
                 !strncmp(" (", t1->death + 7, 2) ? t1->death + 7 + 2 : "",
                 t1->maxlvl);
         /* fixup for closing paren in "escaped... with...Amulet)[max..." */
-        if ((bp = index(linebuf, ')')) != 0)
+        if ((bp = strchr(linebuf, ')')) != 0)
             *bp = (t1->deathdnum == astral_level.dnum) ? '\0' : ' ';
         second_line = FALSE;
     } else if (!strncmp("ascended", t1->death, 8)) {
@@ -1071,7 +1091,7 @@ outentry(int rank, struct toptenentry* t1, boolean so)
             }
             Sprintf(eos(linebuf), fmt, arg);
         } else {
-            Sprintf(eos(linebuf), " in %s", g.dungeons[t1->deathdnum].dname);
+            Sprintf(eos(linebuf), " in %s", gd.dungeons[t1->deathdnum].dname);
             if (t1->deathdnum != knox_level.dnum)
                 Sprintf(eos(linebuf), " on level %d", t1->deathlev);
             if (t1->deathlev != t1->maxlvl)
@@ -1085,8 +1105,14 @@ outentry(int rank, struct toptenentry* t1, boolean so)
     Strcat(linebuf, ".");
 
     /* Quit, starved, ascended, and escaped contain no second line */
-    if (second_line)
-        Sprintf(eos(linebuf), "  %c%s.", highc(*(t1->death)), t1->death + 1);
+    if (second_line) {
+        bp = eos(linebuf);
+        Sprintf(bp, "  %c%s.", highc(*(t1->death)), t1->death + 1);
+        /* fix up "Killed by Mr. Asidonhopo; the shopkeeper"; that starts
+           with a comma but has it changed to semi-colon to keep the comma
+           out of 'record'; change it back for display */
+        (void) strsubst(bp, "; the ", ", the ");
+    }
 
     lngr = (int) strlen(linebuf);
     if (t1->hp <= 0)
@@ -1094,9 +1120,9 @@ outentry(int rank, struct toptenentry* t1, boolean so)
     else
         Sprintf(hpbuf, "%d", t1->hp);
     /* beginning of hp column after padding (not actually padded yet) */
-    hppos = COLNO - (sizeof("  Hp [max]") - 1); /* sizeof(str) includes \0 */
+    hppos = COLNO - (int) (sizeof "  Hp [max]" - sizeof "");
     while (lngr >= hppos) {
-        for (bp = eos(linebuf); !(*bp == ' ' && (bp - linebuf < hppos)); bp--)
+        for (bp = eos(linebuf); !(*bp == ' ' && bp - linebuf < hppos); bp--)
             ;
         /* special case: word is too long, wrap in the middle */
         if (linebuf + 15 >= bp)
@@ -1155,31 +1181,68 @@ score_wanted(
     const char **players,
     int uid)
 {
+    const char *arg, *nxt;
     int i;
 
-    if (current_ver
-        && (t1->ver_major != VERSION_MAJOR || t1->ver_minor != VERSION_MINOR
-            || t1->patchlevel != PATCHLEVEL))
+    if (current_ver && (t1->ver_major != VERSION_MAJOR
+                        || t1->ver_minor != VERSION_MINOR
+                        || t1->patchlevel != PATCHLEVEL))
         return 0;
 
     if (sysopt.pers_is_uid && !playerct && t1->uid == uid)
         return 1;
 
+    /*
+     * FIXME:
+     *  This selection produces a union (OR) of criteria rather than
+     *  an intersection (AND).  So
+     *    nethack -s -u igor -p Cav -r Hum
+     *  will list all entries for name igor regardless of role or race
+     *  plus all entries for cave dwellers regardless of name or race
+     *  plus all entries for humans regardless of name or role.
+     *
+     *  It would be more useful if it only chose human cave dwellers
+     *  named igor.  That would be pretty straightforward if only one
+     *  instance of each of the criteria were possible, but
+     *    nethack -s -u igor -u ayn -p Cav -p Pri -r Hum -r Dwa
+     *  should list human cave dwellers named igor and human cave
+     *  dwellers named ayn plus dwarven cave dwellers named igor and
+     *  dwarven cave dwellers named ayn plus human priest[esse]s named
+     *  igor and human priest[esse]s named ayn (the combination of
+     *  dwarven priest[esse]s doesn't occur but the selection can test
+     *  entries without being aware of such; it just won't find any
+     *  matches for that).  An extra initial pass of the command line
+     *  to collect all criteria before testing any entry is needed to
+     *  accomplish this.  And we might need to drop support for
+     *  pre-3.3.0 entries (old elf role) depending on how the criteria
+     *  matching is performed.
+     *
+     *  It also ought to extended to handle
+     *    nethack -s -u igor-Cav-Hum
+     *  Alignment and gender could be useful too but no one has ever
+     *  clamored for them.  Presumably if they care they postprocess
+     *  with some custom tool.
+     */
+
     for (i = 0; i < playerct; i++) {
-        if (players[i][0] == '-' && index("pr", players[i][1])
-            && players[i][2] == 0 && i + 1 < playerct) {
-            const char *arg = players[i + 1];
-            if ((players[i][1] == 'p'
-                 && str2role(arg) == str2role(t1->plrole))
-                || (players[i][1] == 'r'
-                    && str2race(arg) == str2race(t1->plrace)))
+        arg = players[i];
+        if (arg[0] == '-' && arg[1] == 'u' && arg[2] != '\0')
+            arg += 2; /* handle '-uname' */
+
+        if (arg[0] == '-' && strchr("pru", arg[1]) && !arg[2]
+            && i + 1 < playerct) {
+            nxt = players[i + 1];
+            if ((arg[1] == 'p' && str2role(nxt) == str2role(t1->plrole))
+                || (arg[1] == 'r' && str2race(nxt) == str2race(t1->plrace))
+                /* handle '-u name' */
+                || (arg[1] == 'u' && (!strcmp(nxt, "all")
+                                      || !strncmp(t1->name, nxt, NAMSZ))))
                 return 1;
             i++;
-        } else if (strcmp(players[i], "all") == 0
-                   || strncmp(t1->name, players[i], NAMSZ) == 0
-                   || (players[i][0] == '-' && players[i][1] == t1->plrole[0]
-                       && players[i][2] == 0)
-                   || (digit(players[i][0]) && rank <= atoi(players[i])))
+        } else if (!strcmp(arg, "all")
+                   || !strncmp(t1->name, arg, NAMSZ)
+                   || (arg[0] == '-' && arg[1] == t1->plrole[0] && !arg[2])
+                   || (digit(arg[0]) && rank <= atoi(arg)))
             return 1;
     }
     return 0;
@@ -1194,18 +1257,21 @@ score_wanted(
 void
 prscore(int argc, char **argv)
 {
-    const char **players;
-    int playerct, rank;
-    boolean current_ver = TRUE, init_done = FALSE;
+    const char **players, *player0;
+    int i, playerct, rank;
     register struct toptenentry *t1;
     FILE *rfile;
-    boolean match_found = FALSE;
-    register int i;
-    char pbuf[BUFSZ];
+    char pbuf[BUFSZ], *p;
+    unsigned ln;
     int uid = -1;
-    const char *player0;
+    boolean current_ver = TRUE, init_done = FALSE, match_found = FALSE;
 
-    if (argc < 2 || strncmp(argv[1], "-s", 2)) {
+    /* expect "-s" or "--scores"; "-s<anything> is accepted */
+    ln = (argc < 2) ? 0U
+         : ((p = strchr(argv[1], ' ')) != 0) ? (unsigned) (p - argv[1])
+           : Strlen(argv[1]);
+    if (ln < 2 || (strncmp(argv[1], "-s", 2)
+                   && strcmp(argv[1], "--scores"))) {
         raw_printf("prscore: bad arguments (%d)", argc);
         return;
     }
@@ -1233,12 +1299,17 @@ prscore(int argc, char **argv)
         init_done = TRUE;
     }
 
-    if (!argv[1][2]) { /* plain "-s" */
+    /* to get here, argv[1] either starts with "-s" or is "--scores" without
+       trailing stuff; for "-s<anything>" treat <anything> as separate arg */
+    if (argv[1][1] == '-' || !argv[1][2]) {
         argc--;
         argv++;
-    } else
+    } else { /* concatenated arg string; use up "-s" but keep argc,argv */
         argv[1] += 2;
-
+    }
+    /* -v doesn't take a version number arg; it means 'all versions present
+       in the file' instead of the default of only the current version;
+       unlike -s, we don't accept "-v<anything>" for non-empty <anything> */
     if (argc > 1 && !strcmp(argv[1], "-v")) {
         current_ver = FALSE;
         argc--;
@@ -1251,13 +1322,10 @@ prscore(int argc, char **argv)
             playerct = 0;
             players = (const char **) 0;
         } else {
-            player0 = g.plname;
+            player0 = gp.plname;
             if (!*player0)
-#ifdef AMIGA
-                player0 = "all"; /* single user system */
-#else
-                player0 = "hackplayer";
-#endif
+                player0 = "all"; /* if no plname[], show all scores
+                                  * (possibly filtered by '-v') */
             playerct = 1;
             players = &player0;
         }
@@ -1268,7 +1336,7 @@ prscore(int argc, char **argv)
     raw_print("");
 
     t1 = tt_head = newttentry();
-    for (rank = 1;; rank++) {
+    for (rank = 1; ; rank++) {
         readentry(rfile, t1);
         if (t1->points == 0)
             break;
@@ -1295,12 +1363,21 @@ prscore(int argc, char **argv)
     } else {
         Sprintf(pbuf, "Cannot find any %sentries for ",
                 current_ver ? "current " : "");
-        if (playerct < 1)
-            Strcat(pbuf, "you.");
-        else {
+        if (playerct < 1) {
+            Strcat(pbuf, "you");
+        } else {
+            /* minor bug: 'nethack -s -u ziggy' will say "any of"
+               even though the '-u' doesn't indicate multiple names */
             if (playerct > 1)
                 Strcat(pbuf, "any of ");
             for (i = 0; i < playerct; i++) {
+                /* accept '-u name' and '-uname' as well as just 'name'
+                   so skip '-u' for the none-found feedback */
+                if (!strncmp(players[i], "-u", 2)) {
+                    if (!players[i][2])
+                        continue;
+                    players[i] += 2;
+                }
                 /* stop printing players if there are too many to fit */
                 if (strlen(pbuf) + strlen(players[i]) + 2 >= BUFSZ) {
                     if (strlen(pbuf) < BUFSZ - 4)
@@ -1311,7 +1388,7 @@ prscore(int argc, char **argv)
                 }
                 Strcat(pbuf, players[i]);
                 if (i < playerct - 1) {
-                    if (players[i][0] == '-' && index("pr", players[i][1])
+                    if (players[i][0] == '-' && strchr("pr", players[i][1])
                         && players[i][2] == 0)
                         Strcat(pbuf, " ");
                     else
@@ -1319,10 +1396,12 @@ prscore(int argc, char **argv)
                 }
             }
         }
+        /* append end-of-sentence punctuation if there is room */
+        if (strlen(pbuf) < BUFSZ - 1)
+            Strcat(pbuf, ".");
         raw_print(pbuf);
         raw_printf("Usage: %s -s [-v] <playertypes> [maxrank] [playernames]",
-
-                   g.hname);
+                   gh.hname);
         raw_printf("Player types are: [-p role] [-r race]");
     }
     free_ttlist(tt_head);
@@ -1414,7 +1493,7 @@ tt_name(void)
  * to an object (for statues or morgue corpses).
  */
 struct obj *
-tt_oname(struct obj* otmp)
+tt_oname(struct obj *otmp)
 {
     struct toptenentry *tt;
     if (!otmp)
@@ -1443,7 +1522,7 @@ static void
 nsb_mung_line(p)
 char *p;
 {
-    while ((p = index(p, ' ')) != 0)
+    while ((p = strchr(p, ' ')) != 0)
         *p = '|';
 }
 
@@ -1451,7 +1530,7 @@ static void
 nsb_unmung_line(p)
 char *p;
 {
-    while ((p = index(p, '|')) != 0)
+    while ((p = strchr(p, '|')) != 0)
         *p = ' ';
 }
 #endif /* NO_SCAN_BRACK */

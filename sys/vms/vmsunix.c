@@ -7,6 +7,14 @@
 
 #include "hack.h"
 
+#ifdef VMSVSI
+#include <lib$routines.h>
+#include <smg$routines.h>
+#include <starlet.h>
+#define sys$imgsta SYS$IMGSTA
+#include <unixio.h>
+#endif
+
 #include <descrip.h>
 #include <dvidef.h>
 #include <jpidef.h>
@@ -25,10 +33,13 @@
 
 extern int debuggable; /* defined in vmsmisc.c */
 
+#ifndef VMSVSI
 extern void VDECL(lib$signal, (unsigned, ...));
 extern unsigned long sys$setprv();
 extern unsigned long lib$getdvi(), lib$getjpi(), lib$spawn(), lib$attach();
 extern unsigned long smg$init_term_table_by_type(), smg$del_term_table();
+#endif
+
 #define vms_ok(sts) ((sts) & 1) /* odd => success */
 
 /* this could be static; it's only used within this file;
@@ -76,11 +87,11 @@ veryold(int fd)
      */
     for (i = 1; i <= MAXDUNGEON * MAXLEVEL + 1; i++) {
         /* try to remove all */
-        set_levelfile_name(g.lock, i);
-        (void) delete (g.lock);
+        set_levelfile_name(gl.lock, i);
+        (void) delete (gl.lock);
     }
-    set_levelfile_name(g.lock, 0);
-    if (delete (g.lock))
+    set_levelfile_name(gl.lock, 0);
+    if (delete (gl.lock))
         return 0; /* cannot remove it */
     return 1;     /* success! */
 }
@@ -105,46 +116,46 @@ getlock(void)
         error("Quitting.");
     }
 
-    /* default value of g.lock[] is "1lock" where '1' gets changed to
+    /* default value of gl.lock[] is "1lock" where '1' gets changed to
        'a','b',&c below; override the default and use <uid><charname>
        if we aren't restricting the number of simultaneous games */
-    if (!g.locknum)
-        Sprintf(g.lock, "_%u%s", (unsigned) getuid(), g.plname);
+    if (!gl.locknum)
+        Sprintf(gl.lock, "_%u%s", (unsigned) getuid(), gp.plname);
 
-    regularize(g.lock);
-    set_levelfile_name(g.lock, 0);
-    if (g.locknum > 25)
-        g.locknum = 25;
+    regularize(gl.lock);
+    set_levelfile_name(gl.lock, 0);
+    if (gl.locknum > 25)
+        gl.locknum = 25;
 
     do {
-        if (g.locknum)
-            g.lock[0] = 'a' + i++;
+        if (gl.locknum)
+            gl.lock[0] = 'a' + i++;
 
-        if ((fd = open(g.lock, 0, 0)) == -1) {
+        if ((fd = open(gl.lock, 0, 0)) == -1) {
             if (errno == ENOENT)
                 goto gotlock; /* no such file */
-            perror(g.lock);
+            perror(gl.lock);
             unlock_file(HLOCK);
-            error("Cannot open %s", g.lock);
+            error("Cannot open %s", gl.lock);
         }
 
         if (veryold(fd)) /* if true, this closes fd and unlinks lock */
             goto gotlock;
         (void) close(fd);
-    } while (i < g.locknum);
+    } while (i < gl.locknum);
 
     unlock_file(HLOCK);
-    error(g.locknum ? "Too many hacks running now."
+    error(gl.locknum ? "Too many hacks running now."
                   : "There is a game in progress under your name.");
 
  gotlock:
-    fd = creat(g.lock, FCMASK);
+    fd = creat(gl.lock, FCMASK);
     unlock_file(HLOCK);
     if (fd == -1) {
         error("cannot creat lock file.");
     } else {
-        if (write(fd, (char *) &g.hackpid, sizeof(g.hackpid))
-            != sizeof(g.hackpid)) {
+        if (write(fd, (char *) &gh.hackpid, sizeof(gh.hackpid))
+            != sizeof(gh.hackpid)) {
             error("cannot write lock");
         }
         if (close(fd) == -1) {
@@ -216,7 +227,10 @@ vms_define(const char *name, const char *value, int flag)
     };
     static struct itm3 itm_lst[] = { { 0, LNM$_STRING, 0, 0 }, { 0, 0 } };
     struct dsc nam_dsc, val_dsc, tbl_dsc;
-    unsigned long result, sys$crelnm(), lib$set_logical();
+    unsigned long result;
+#ifndef VMSVSI
+    unsigned long sys$crelnm(), lib$set_logical();
+#endif
 
     /* set up string descriptors */
     nam_dsc.mbz = val_dsc.mbz = tbl_dsc.mbz = 0;
@@ -392,8 +406,8 @@ check_user_string(const char *userlist)
             return TRUE;
         /* doesn't match full word, but maybe we got a false hit when
            looking for "jane" in the list "janedoe jane" so keep going */
-        p = index(sptr + 1, ' ');
-        q = index(sptr + 1, ',');
+        p = strchr(sptr + 1, ' ');
+        q = strchr(sptr + 1, ',');
         if (!p || (q && q < p))
             p = q;
         if (!p)
@@ -581,8 +595,11 @@ struct dsc {
     char *adr;
 };                             /* descriptor */
 typedef unsigned long vmscond; /* vms condition value */
+
+#ifndef VMSVSI
 vmscond lib$find_file(const struct dsc *, struct dsc *, genericptr *);
 vmscond lib$find_file_end(void **);
+#endif
 
 /* collect a list of character names from all save files for this player */
 int
@@ -595,7 +612,7 @@ vms_get_saved_games(const char *savetemplate, /* wildcarded save file name in na
     char *charname, wildcard[255 + 1], filename[255 + 1];
     genericptr_t context = 0;
 
-    Strcpy(wildcard, savetemplate); /* plname_from_file overwrites g.SAVEF */
+    Strcpy(wildcard, savetemplate); /* plname_from_file overwrites gs.SAVEF */
     in.mbz = 0; /* class and type; leave them unspecified */
     in.len = (unsigned short) strlen(wildcard);
     in.adr = wildcard;

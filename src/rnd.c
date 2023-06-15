@@ -73,17 +73,12 @@ rn2_on_display_rng(register int x)
 #else   /* USE_ISAAC64 */
 
 /* "Rand()"s definition is determined by [OS]conf.h */
-#if defined(LINT) && defined(UNIX) /* rand() is long... */
-extern int rand(void);
-#define RND(x) (rand() % x)
-#else /* LINT */
 #if defined(UNIX) || defined(RANDOM)
 #define RND(x) ((int) (Rand() % (long) (x)))
 #else
 /* Good luck: the bottom order bits are cyclic. */
 #define RND(x) ((int) ((Rand() >> 3) % (x)))
 #endif
-#endif /* LINT */
 int
 rn2_on_display_rng(register int x)
 {
@@ -159,6 +154,12 @@ rnd(register int x)
     return x;
 }
 
+int
+rnd_on_display_rng(register int x)
+{
+    return rn2_on_display_rng(x) + 1;
+}
+
 /* d(N,X) == NdX == dX+dX+...+dX N times; n <= d(n,x) <= (n*x) */
 int
 d(register int n, register int x)
@@ -195,13 +196,8 @@ rne(register int x)
 int
 rnz(int i)
 {
-#ifdef LINT
-    int x = i;
-    int tmp = 1000;
-#else
     register long x = (long) i;
     register long tmp = 1000L;
-#endif
 
     tmp += rn2(1000);
     tmp *= rne(4);
@@ -213,6 +209,38 @@ rnz(int i)
         x /= tmp;
     }
     return (int) x;
+}
+
+/* percent(x) = x% chance it returns true */
+boolean
+percent(int x)
+{
+    if (x < 0) {
+        impossible("percent(%d) attempted, returning false", x);
+        return FALSE;
+    }
+    else if (x > 100) {
+        impossible("percent(%d) attempted, returning true", x);
+        return TRUE;
+    }
+    return x > rn2(100);
+}
+
+/* rnf(x, y) = x in y (or x/y) chance it returns true */
+boolean
+rnf(int numerator, int denominator) /**< @returns (rnf(n,d) < n/d) */
+{
+    if (denominator <= 0) {
+        impossible("rnf(%d, %d) attempted, returning false",
+                   numerator, denominator);
+        return FALSE;
+    }
+    else if (numerator > denominator) {
+        impossible("rnf(%d, %d) attempted, returning true",
+                   numerator, denominator);
+        return TRUE;
+    }
+    return rn2(denominator) < numerator;
 }
 
 /*rnd.c*/

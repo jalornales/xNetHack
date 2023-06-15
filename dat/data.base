@@ -1,5 +1,5 @@
 # NetHack 3.7	data.base
-# $NHDT-Date: 1608767189 2020/12/23 23:46:29 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.99 $
+# $NHDT-Date: 1684001509 2023/05/13 18:11:49 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.106 $
 #	Copyright (c) 1994, 1995, 1996 by the NetHack Development Team
 #	Copyright (c) 1994 by Boudewijn Wayers
 #	NetHack may be freely redistributed.  See license for details.
@@ -3669,12 +3669,19 @@ huge chunk of meat
 		[ Grace Before Meat, by Robert Burns ]
 # nethack's Medusa doesn't match the myth very closely, particularly in
 # how reflection is involved, but that's par for the course
+#
+# this used to begin "Medusa, one of the three Gorgons or Graeae" as
+# if Graeae and Gorgons where the same thing, but Bulfinch's Mythology
+# indicates that they are quite different; since the first paragraph is
+# a made-up introduction to an excerpt from that work, the contradictory
+# mention of Graeae has been removed
 medusa
 perseus
 shield of reflection
-	Medusa, one of the three Gorgons or Graeae, is the only one
-	of her sisters to have assumed mortal form and inhabited the
-	dungeon world.
+	Medusa, one of the three Gorgons, is the only one of her
+	sisters to have assumed mortal form and inhabited the dungeon
+	world.
+		[]
 
 	When Perseus was grown up Polydectes sent him to attempt the
 	conquest of Medusa, a terrible monster who had laid waste the
@@ -4294,6 +4301,26 @@ pan* de muerto
 	A sweetbread which is typically embossed with the shapes of
 	finger bones and baked for Dia de Muertos celebrations. Its name
 	translates to "bread of the dead".
+pancake
+	"Wait." Wyndle zipped forward, leaving a trail of vines and
+	crystal behind. He grew up the back of the chull cart, curling
+	onto its wood right in front of her. He made a face there, looking
+	at her. "Is that why we left all of a sudden? Is that why we’re
+	here? Did you come chasing that monster?"
+	"Course not," Lift said, hands in her pockets. "That would be
+	stupid."
+	"Which you are not."
+	"Nope."
+	"Then why are we here?"
+	"They got these pancakes here," she said, "with things cooked into
+	them. Supposed to be super tasty, and they eat them during the
+	Weeping. Ten varieties. I’m gonna steal one of each."
+	"You came all this way, leaving behind luxury, to eat some
+	pancakes."
+	"Really awesome pancakes."
+	"Despite the fact that a deific Shardbearer is here -- a man who
+	went to great lengths to try to execute you."
+		[ Edgedancer, by Brandon Sanderson ]
 panther
 	And lo! almost where the ascent began,
 	A panther light and swift exceedingly,
@@ -5402,6 +5429,32 @@ stair*
 	Dr. Peter Venkman:  They go up.
 		[ Ghostbusters, directed by Ivan Reitman,
 		  written by Dan Ackroyd and Harold Ramis ]
+*stalker
+	“You don’t understand,” he said, “who I am or what I am. I’ll show
+	you. By Heaven! I’ll show you.” Then he put his open palm over his
+	face and withdrew it. The centre of his face became a black
+	cavity. “Here,” he said. He stepped forward and handed Mrs. Hall
+	something which she, staring at his metamorphosed face, accepted
+	automatically. Then, when she saw what it was, she screamed
+	loudly, dropped it, and staggered back. The nose—it was the
+	stranger’s nose! pink and shining—rolled on the floor.
+
+	Then he removed his spectacles, and everyone in the bar gasped. He
+	took off his hat, and with a violent gesture tore at his whiskers
+	and bandages. For a moment they resisted him. A flash of horrible
+	anticipation passed through the bar. “Oh, my Gard!” said some one.
+	Then off they came.
+
+	It was worse than anything. Mrs. Hall, standing open-mouthed and
+	horror-struck, shrieked at what she saw, and made for the door of
+	the house. Everyone began to move. They were prepared for scars,
+	disfigurements, tangible horrors, but nothing! The bandages and
+	false hair flew across the passage into the bar, making a
+	hobbledehoy jump to avoid them. Everyone tumbled on everyone else
+	down the steps. For the man who stood there shouting some
+	incoherent explanation, was a solid gesticulating figure up to the
+	coat-collar of him, and then—nothingness, no visible thing at all!
+		[ The Invisible Man, by H. G. Wells ]
 ~statue trap
 statue*
 	Then at last he began to wonder why the lion was standing so
@@ -6316,7 +6369,7 @@ spelunker
 speleologist
 collector
 curator
-	Archelogist ranks
+	Archeologist ranks
 	  title            level
 	Digger            1 to 2
 	Field Worker      3 to 5
