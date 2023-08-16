@@ -554,6 +554,10 @@ pick_lock(
                 }
                 switch (picktyp) {
                 case CREDIT_CARD:
+                    if (hash1(otmp->o_id) % 5 < 2) {
+                        pline("It doesn't look like this lock can be opened with a credit card.");
+                        return PICKLOCK_LEARNED_SOMETHING;
+                    }
                     ch = ACURR(A_DEX) + 20 * Role_if(PM_ROGUE);
                     break;
                 case LOCK_PICK:
@@ -662,6 +666,13 @@ pick_lock(
 
             switch (picktyp) {
             case CREDIT_CARD:
+                /* chance of unopenable door increases with depth;
+                 * 10% on early floors, increasing to 60% or so by the Sanctum */
+                if (coord_hash(cc.x, cc.y, ledger_no(&u.uz)) % 10
+                    < (unsigned int) (depth(&u.uz) / 7) + 1) {
+                    pline("It doesn't look like this lock can be opened with a credit card.");
+                    return PICKLOCK_LEARNED_SOMETHING;
+                }
                 ch = 2 * ACURR(A_DEX) + 20 * Role_if(PM_ROGUE);
                 break;
             case LOCK_PICK:
@@ -946,16 +957,11 @@ doopen_indir(coordxy x, coordxy y)
     }
 
     /* door is known to be CLOSED */
-    if (rnl(20) < (ACURRSTR + ACURR(A_DEX) + ACURR(A_CON)) / 3) {
-        pline_The("door opens.");
-        if (postdoortrapped(cc.x, cc.y, &gy.youmonst, FINGER, D_ISOPEN) == 0) {
-            set_doorstate(door, D_ISOPEN);
-            feel_newsym(cc.x, cc.y); /* the hero knows she opened it */
-            unblock_point(cc.x, cc.y); /* vision: new see through there */
-        }
-    } else {
-        exercise(A_STR, TRUE);
-        pline_The("door resists!");
+    pline_The("door opens.");
+    if (postdoortrapped(cc.x, cc.y, &gy.youmonst, FINGER, D_ISOPEN) == 0) {
+        set_doorstate(door, D_ISOPEN);
+        feel_newsym(cc.x, cc.y); /* the hero knows she opened it */
+        unblock_point(cc.x, cc.y); /* vision: new see through there */
     }
 
     return ECMD_TIME;
@@ -1077,17 +1083,11 @@ doclose(void)
             pline("You're too small to push the door closed.");
             return res;
         }
-        if (u.usteed
-            || rn2(25) < (ACURRSTR + ACURR(A_DEX) + ACURR(A_CON)) / 3) {
-            pline_The("door closes.");
-            if (postdoortrapped(x, y, &gy.youmonst, FINGER, D_CLOSED) == 0) {
-                set_doorstate(door, D_CLOSED);
-                feel_newsym(x, y); /* the hero knows she closed it */
-                block_point(x, y); /* vision:  no longer see there */
-            }
-        } else {
-            exercise(A_STR, TRUE);
-            pline_The("door resists!");
+        pline_The("door closes.");
+        if (postdoortrapped(x, y, &gy.youmonst, FINGER, D_CLOSED) == 0) {
+            set_doorstate(door, D_CLOSED);
+            feel_newsym(x, y); /* the hero knows she closed it */
+            block_point(x, y); /* vision:  no longer see there */
         }
     }
 
